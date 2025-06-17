@@ -1,3 +1,12 @@
+/**
+ *			Create GUI Window, frames and rendering with OpenGL 3
+ *
+ * Reference:
+ * OpenGL: https://www.glfw.org/docs/latest/window.html
+ * ImGui: imgui/examples/example_glfw_opengl3
+ * ImPlot
+ */
+
 #include "imgui/imgui.h"
 #include "imgui/backends/imgui_impl_glfw.h"
 #include "imgui/backends/imgui_impl_opengl3.h"
@@ -22,7 +31,7 @@ int main() {
 	// OpenGL
 	const char* glsl_version = "#version 130";
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 0);
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
 
 	// Window
 	GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Title", nullptr, nullptr);
@@ -37,7 +46,7 @@ int main() {
 	ImGui::CreateContext();
 	ImGuiIO& io = ImGui::GetIO(); (void)io;
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-	ImGui::StyleColorsDark();
+	ImGui::StyleColorsClassic();
 
 	// Renderer backend: OpenGL
 	ImGui_ImplGlfw_InitForOpenGL(window, true);

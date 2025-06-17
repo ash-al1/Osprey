@@ -1,3 +1,9 @@
+/*
+ * References:
+ * ImGui: https://github.com/ocornut/imgui/wiki/Getting-Started
+ * ImGui: https://skia.googlesource.com/external/github.com/ocornut/imgui/+/refs/heads/master/imgui.h
+ */
+
 #include "SignalGui.h"
 #include <iostream>
 
@@ -10,13 +16,15 @@ SignalGui::~SignalGui() {
 }
 
 void SignalGui::Update() {
-	ImGui::SetWindowPos(ImVec2(0, 0), ImGuiCond_Always);
-	ImGui::SetWindowSize(ImVec2(WINDOW_WIDTH, WINDOW_HEIGHT), ImGuiCond_Always);
+	ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+	ImGui::SetNextWindowSize(ImVec2(WINDOW_WIDTH, WINDOW_HEIGHT), ImGuiCond_Always);
+
 
 	ImGui::Begin("SigProc", nullptr,
-				  ImGuiWindowFlags_NoResize |
-				  ImGuiWindowFlags_NoTitleBar |
-				  ImGuiWindowFlags_NoMove);
+			ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_NoResize);
+
+	// Framerate
+	ImGui::Text("FPS: %.2f", ImGui::GetIO().Framerate);
 
 	// Dimensions of each plot
 	float quarter_width  = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
@@ -65,7 +73,7 @@ void SignalGui::RenderFrequencyPlot() {
 void SignalGui::RenderSpectrogramPlot() {
 	ImGui::Text("Spectrogram");
 	if ( ImPlot::BeginPlot("##SpectrogramPlot", ImVec2(-1, -1))) {
-		ImPlot::SetupAxes("Time [s]", "Frequency [Hz]");
+		ImPlot::SetupAxes("Time [S]", "Frequency [KHz]", ImPlotAxisFlags_NoTickLabels, ImPlotAxisFlags_Lock);
 		ImPlot::EndPlot();
 	}
 }
