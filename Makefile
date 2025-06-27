@@ -1,7 +1,7 @@
 CXX = g++
 CXXFLAGS = -Wall -Wextra
 LIBS = -luhd -lpthread
-USRP_LIBS = UsrpController.cpp UsrpController.h TestUsrpController.cpp
+USRP_LIBS = UsrpController.cpp TestUsrpController.cpp
 TARGET = TestUsrp
 
 all: cmake-build
@@ -14,7 +14,7 @@ cmake-build:
 usrp: $(TARGET)
 
 $(TARGET): $(USRP_LIBS)
-	$(CXX) $(CXXFLAGS) $(LIBS) -o $(TARGET) $(USRP_LIBS)
+	$(CXX) $(CXXFLAGS) $(USRP_LIBS) -o $(TARGET) $(LIBS)
 
 clean:
 	rm -rf build
