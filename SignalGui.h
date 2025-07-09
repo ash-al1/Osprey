@@ -5,8 +5,8 @@
 
 class SignalGui {
 private:
-	static constexpr int WINDOW_WIDTH  = 1200;
-	static constexpr int WINDOW_HEIGHT = 800;
+	static constexpr int WINDOW_WIDTH  = 900;
+	static constexpr int WINDOW_HEIGHT = 600;
 
 	static constexpr int N_SAMPLES = 1000;
 	static constexpr int N_FREQ = 512;

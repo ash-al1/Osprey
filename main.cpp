@@ -15,8 +15,8 @@
 #include <iostream>
 
 #include "SignalGui.h"
-#define WINDOW_WIDTH  1200
-#define WINDOW_HEIGHT 800
+#define WINDOW_WIDTH  900
+#define WINDOW_HEIGHT 600
 
 static void glfw_error_callback(int error, const char* description) {
 	fprintf(stderr, "GLFW Error %d: %s\n", error, description);
