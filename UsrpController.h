@@ -1,9 +1,13 @@
 #pragma once
 
-#include <uhd/usrp/multi_usrp.hpp>
-#include <uhd/exception.hpp>
+#include <atomic>
+#include <complex>
+#include <functional>
+#include <thread>
 #include <string>
 #include <memory>
+#include <uhd/usrp/multi_usrp.hpp>
+#include <uhd/exception.hpp>
 
 class UsrpController {
 public:
@@ -44,6 +48,16 @@ public:
 	bool IsSampleRateValid(double rate_sps) const;	
 	bool IsRxGainValid(double gain_db) const;	
 
+	// Receiver
+	using SampleCallback = std::function<void(const std::complex<float>*, size_t)>;
+	bool StartReceiving(SampleCallback callback, size_t buffer_size = 4096);
+	bool IsReceiving() const { return receiving_.load(); };
+	void StopReceiving();
+
+	// Receiver getters
+	size_t GetTotalSamplesReceived() const { return total_samples_received_.load(); };
+	size_t GetOverflowCount() const { return overflow_count_.load(); };
+
 	// Errors
 	std::string GetLastError() const { return last_error_; }
 
@@ -53,11 +67,23 @@ private:
 	std::string serial_number_;
 	bool initialized_;
 
+	// Threads
+	std::atomic<bool> receiving_;
+	std::atomic<bool> stop_receiving_;
+	std::unique_ptr<std::thread> receive_thread_;
+
+	// Receiver
+	std::atomic<size_t> total_samples_received_;
+	std::atomic<size_t> overflow_count_;
+	SampleCallback sample_callback_;
+	size_t buffer_size_;
+
 	// Error tracker
 	mutable std::string last_error_;
 
 	// Helpers
 	void SetError(const std::string& error) const;
+	void ReceiveWorker();
 	bool ValidateChannel(size_t channel) const;
 	bool ValidateDevice() const;
 

@@ -79,6 +79,98 @@ void PrintGetters(UsrpController& usrp) {
 	std::cout << "Rx antenna: " << usrp.GetRxAntenna() << std::endl;
 }	
 
+void TestRx(UsrpController& usrp) {
+	std::cout << "4. Testing on 2.4GHz single reception..." << std::endl;
+	if (usrp.SetRxFrequency(2.45e9)) {
+		std::cout << "	freq: " << usrp.GetRxFrequency() / 1e9 << std::endl;
+	} else {
+		std::cout << " Failed to set freq" << usrp.GetLastError() << std::endl;
+		return;
+	}
+	if (usrp.SetRxSampleRate(10e6)) {
+		std::cout << "	sample rate: " << usrp.GetRxSampleRate() / 1e6
+			<< std::endl;
+	} else {
+		std::cout << " Failed to set sample rate" << usrp.GetLastError()
+			<< std::endl;
+		return;
+	}
+	if (usrp.SetRxGain(40.0)) {
+		std::cout << "	gain: " << usrp.GetRxGain() << std::endl;
+	} else {
+		std::cout << " Failed to set gain" << usrp.GetLastError() << std::endl;
+		return;
+	}
+	if (usrp.SetRxBandwidth(12e6)) {
+		std::cout << "	bw: " << usrp.GetRxBandwidth() << std::endl;
+	} else {
+		std::cout << " Failed to bandwidth" << usrp.GetLastError() << std::endl;
+		return;
+	}
+
+	std::cout << "starting on 2.4GHz..." << std::endl;
+	size_t samples_received = 0;
+	float max_magnitude = 0.0f;
+	float avg_magnitude = 0.0f;
+
+	auto callback = [&](const std::complex<float>* samples, size_t count) {
+        samples_received += count;
+        
+        float batch_sum = 0.0f;
+        float batch_max = 0.0f;
+        for (size_t i = 0; i < count; ++i) {
+            float magnitude = std::abs(samples[i]);
+            batch_sum += magnitude;
+            if (magnitude > batch_max) {
+                batch_max = magnitude;
+            }
+        }
+        
+        avg_magnitude = (avg_magnitude * (samples_received - count) +
+				batch_sum) / samples_received;
+        if (batch_max > max_magnitude) {
+            max_magnitude = batch_max;
+        }
+        
+        if (samples_received % 1000000 == 0) {
+            std::cout << "  Received " << samples_received / 1000000
+				<< "M samples..." << std::endl;
+        }
+    };
+
+	if (!usrp.StartReceiving(callback, 8192)) {
+        std::cout << "  FAILED to start receiving: "
+			<< usrp.GetLastError() << std::endl;
+        return;
+    }
+
+    std::cout << "  reception started" << std::endl;
+
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+    usrp.StopReceiving();
+
+    std::cout << "  test completed:" << std::endl;
+    std::cout << "    total samples received: "
+		<< usrp.GetTotalSamplesReceived() << std::endl;
+    std::cout << "    overflow count: " << usrp.GetOverflowCount() << std::endl;
+    std::cout << "    max signal magnitude: " << max_magnitude << std::endl;
+    std::cout << "    average signal magnitude: " << avg_magnitude << std::endl;
+
+    double expected_samples = usrp.GetRxSampleRate() * 5.0;
+    double reception_rate = (double)usrp.GetTotalSamplesReceived() / expected_samples * 100.0;
+    std::cout << "    Rx rate: " << std::fixed << std::setprecision(1)
+              << reception_rate << "%" << std::endl;
+
+    if (usrp.GetOverflowCount() == 0 && reception_rate > 95.0) {
+        std::cout << "  SUCCESS" << std::endl;
+    } else if (usrp.GetOverflowCount() > 10) {
+        std::cout << "  WARNING: High overflow count" << std::endl;
+    } else {
+        std::cout << "  WARNING: High underflow count" << std::endl;
+    }
+
+}
+
 int main() {
 	std::cout << "USRP B210 Controller Test Program" << std::endl;
 	std::cout << "=================================" << std::endl;
@@ -93,10 +185,11 @@ int main() {
 	std::cout << "SUCCESS: USRP initialized" << std::endl;
 
 	try {
-		TestBasics(usrp);
+		TestRx(usrp);
+		/*TestBasics(usrp);
 		TestParameters(usrp);
 		TestErrors(usrp);
-		PrintGetters(usrp);
+		PrintGetters(usrp);*/
 	} catch(std::exception& e) {
 		std::cerr << "Exception during testing : " <<  e.what() << std::endl;
 		return -1;
