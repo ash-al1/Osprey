@@ -22,12 +22,24 @@ SignalGui::SignalGui(Mode mode)
 	, signal_freq_(50.0f)
 	, spectrogram_row_(0)
 	, update_counter_(0)
-	, mode_(mode) {
+	, mode_(mode)
+	, usrp_controller(nullptr)
+	, usrp_initialized_(false)
+	, samples_received_(0)
+	, overflow_count_(0)
+	, usrp_frequency_(2.45e9)
+	, usrp_samples_rate_(10e6)
+	, usrp_gain_(40.0) {
 
 	if (mode_ == Mode::SIMULATION) {
 		std::cout << "Using simulated mode" << std::endl;
 	} else {
 		std::cout << "Using USRP mode" << std::endl;
+		if (InitializeUsrp()) {
+			std::cout << "USRP initialized successfully" << std::endl;
+		} else {
+			std::cout << "Failed to initialize USRP" << std::endl;
+		}
 	}
 	for (int t = 0; t < N_TIME_BINS; ++t) {
 		for (int f = 0; f < N_FREQ; ++f) {
@@ -40,10 +52,110 @@ SignalGui::SignalGui(Mode mode)
 SignalGui::~SignalGui() {
 }
 
+bool SignalGui::InitializeUsrp() {
+	if (usrp_initialize_.load()) { return true; }
+
+	try {
+		usrp_controller_ = std::make_unique<UsrpController>();
+		if (!usrp_controller_->Initialize("32C1EC6")) {
+			std::cerr << "Failed to initialize USRP: " << usrp_controller_->GetLastError() << std::endl;
+			usrp_controller_.reset();
+			return false;
+		}
+		if (!usrp_controller_->SetRxFrequency(usrp_frequency_)) {
+			std::cerr << "Failed to set frequency: " << usrp_controller_->GetLastError() << std::endl;
+			return false;
+		}
+		if (!usrp_controller_->SetRxSampleRate(usrp_sample_rate_)) {
+			std::cerr << "Failed to set sample rate: " << usrp_controller_->GetLastError() << std::endl;
+			return false;
+		}
+		if (!usrp_controller_->SetRxGain(usrp_gain_)) {
+			std::cerr << "Failed to set gain: " << usrp_controller_->GetLastError() << std::endl;
+			return false;
+		}
+		sample_rate_ = (float) usrp_controller_->GetRxSampleRate();
+
+		std::cout << "Usrp configuration:" << std::endl;
+		std::cout << " freq:" << usrp_controller_->GetRxFrequency() / 1e9 << std::endl;
+		std::cout << " sample rate:" << usrp_controller_->GetRxSampleRate() / 1e6 << std::endl;
+		std::cout << " gain:" << usrp_controller_->GetRxGain() << std::endl;
+
+		usrp_initialized_.store(true);
+		return true;
+	} catch (const std::exception& e) {
+		std::cerr << "Exception during USRP Initialization: " << e.what() << std::endl();
+		return false
+	}
+}
+
+void SignalGui::ShutdownUsrp() {
+	if (usrp_controller_) {
+		usrp_controller_->StopReceiving();
+		usrp_controller_->Shutdown();
+		usrp_controller_.reset();
+	}
+	usrp_initialized_.store(false);
+}
 
 // Real signals from USRP
 void SignalGui::UsrpSamples() {
+	if (!usrp_initialized.load() || !usrp_controller_) {
+		for (int i = 0; i < 64; ++i) { signal_buffer_.Push(0.0f); }
+		return ;
+	}
+	if (!usrp_controller_->IsReceiving()) {
+		std::cout << "Starting sample rx..." << std::endl;
+		auto callback = [this](const std::complex<float>* samples, size_t count) {
+			this->ProcessUsrpSamples(samples, count);
+		};
+		if (!usrp_controller_->StartReceiving(callback, 8192)) {
+			std::cerr << "Failed to start rx: " << usrp_controller_->GetLastError() << std::endl;
+			return;
+		}
+	}
 
+	samples_received_.store(usrp_controller_->GetTotalSamplesReceived());
+	overflow_count_.store(usrp_controller_->GetOverflowCount());
+	if (update_counter_ % 8 == 0) {
+		UpdateUsrpFrequencyDomain();
+	}
+	if (update_counter_ % 16 == 0) {
+		UpdateUsrpWaterfall();
+	}
+}
+
+void SignalGui::ProcessUsrpSamples(const std::complex<float>* samples, size_t count) {
+	for (size_t i = 0; i < count; ++i) {
+		float real_sample = samples[i].real();
+		signal_buffer_.Push(real_sample);
+		current_time_ += 1.0f / sample_rate;
+	}
+}
+
+void SignalGui::UpdateUsrpFrequencyDomain() {
+}
+
+void SignalGui::UpdateUsrpWaterfall() {
+	float nyquist_freq = sample_rate_ / 2.0f;
+	
+	for (int f = 0; f < N_FREQ; ++f) {
+		float freq = (float)f * nyquist_freq / N_FREQ;
+		float intensity = -80.0f;
+		
+		if (usrp_frequency_ > 2.4e9 && usrp_frequency_ < 2.5e9) {
+			if (freq > 1e6 && freq < 5e6) {
+				intensity = -25.0f + 10.0f * std::sin(current_time_ * 0.5f + f * 0.1f);
+			}
+			if (freq > 8e6 && freq < 12e6) {
+				intensity = -35.0f + 5.0f * std::sin(current_time_ * 0.3f + f * 0.05f);
+			}
+		}
+		
+		intensity += 5.0f * (float(rand()) / RAND_MAX - 0.5f);
+		spectrogram_data[spectrogram_row_][f] = intensity;
+	}
+	spectrogram_row_ = (spectrogram_row_ + 1) % N_TIME_BINS;
 }
 
 // Simulated signal generator for testing GUI
@@ -129,6 +241,27 @@ void SignalGui::Update() {
 	ImGui::Text("FPS: %.2f", ImGui::GetIO().Framerate);
 	ImGui::SameLine();
 	ImGui::Text("Mode: %s", (mode_ == Mode::SIMULATION) ? "SIM" : "USRP");
+
+	if (mode_ == Mode::USRP) {
+		ImGui::SameLine();
+		if (usrp_initialized_.load()) {
+			ImGui::TextColored(ImVec4(0, 1, 0, 1), "CONNECTED");
+
+			// Second line with USRP parameters
+			ImGui::Text("USRP: %.3f GHz, %.1f MS/s, %.0f dB",
+			           usrp_frequency_ / 1e9,
+			           usrp_sample_rate_ / 1e6,
+			           usrp_gain_);
+			ImGui::SameLine();
+			ImGui::Text("RX: %.1fM samples", samples_received_.load() / 1e6);
+			if (overflow_count_.load() > 0) {
+				ImGui::SameLine();
+				ImGui::TextColored(ImVec4(1, 0, 0, 1), "OVF: %zu", overflow_count_.load());
+			}
+		} else {
+			ImGui::TextColored(ImVec4(1, 0, 0, 1), "DISCONNECTED");
+		}
+	}
 
 	// Dimensions of each plot
 	float quarter_width  = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;

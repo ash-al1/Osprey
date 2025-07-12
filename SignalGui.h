@@ -3,6 +3,9 @@
 #include "imgui.h"
 #include "implot.h"
 #include "CircularBuffer.h"
+#include "UsrpController.h"
+#include <memory>
+#include <atomic>
 
 class SignalGui {
 public:
@@ -41,11 +44,32 @@ private:
 
 	Mode mode_;
 
+	std::unique_ptr<UsrpController> usrp_controller_;
+	std::atomic<bool> usrp_initialized_;
+	std::atomic<size_t> samples_received_;
+	std::atomic<size_t> overflow_count_;
+
+	double usrp_frequency_;
+	double usrp_sample_rate_;
+	double usrp_gain_;
+
 public:
 	SignalGui(Mode mode = Mode::SIMULATION);
 	~SignalGui();
 
 	void Update();
+
+	bool InitializeUsrp();
+	void ShutdownUsrp();
+	bool IsUsrpInitialized() const { return usrp_initialized_.load(); }
+
+	void SetUsrpFrequency(double freq_hz) { usrp_frequency_ = freq_hz; }
+	void SetUsrpSampleRate(double rate_sps) { usrp_sample_rate_ = rate_sps; }
+	void SetUsrpGain(double gain_db) { usrp_gain_ = gain_db; }
+
+	void GetUsrpFrequency() const { return usrp_frequency_; }
+	void GetUsrpSampleRate() const { return usrp_sample_rate_; }
+	void GetUsrpGain() const { return usrp_gain_; }
 
 private:
 	void GenerateSamples();
@@ -55,4 +79,7 @@ private:
 	void RenderFrequencyPlot();
 	void RenderSpectrogramPlot();
 	void RenderReservedSection();
+	void ProcessUsrpSamples(const std::complex<float>* samples, size_t count);
+	void UpdateUsrpFrequencyDomain();
+	void UpdateUsrpWaterfall();
 };
