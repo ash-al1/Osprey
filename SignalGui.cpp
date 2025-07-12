@@ -21,8 +21,14 @@ SignalGui::SignalGui()
 	, sample_rate_(1000.0f)
 	, signal_freq_(50.0f)
 	, spectrogram_row_(0)
-	, update_counter_(0) {
-	std::cout << "Signal generator (SIM) initialized" << std::endl;
+	, update_counter_(0)
+	, mode_(mode) {
+
+	if (mode_ == Mode::SIMULATION) {
+		std::cout << "Using simulated mode" << std::endl;
+	} else {
+		std::cout << "Using USRP mode" << std::endl;
+	}
 	for (int t = 0; t < N_TIME_BINS; ++t) {
 		for (int f = 0; f < N_FREQ; ++f) {
 			spectrogram_data[t][f] = -80.0f;
@@ -34,7 +40,14 @@ SignalGui::SignalGui()
 SignalGui::~SignalGui() {
 }
 
-void SignalGui::GenerateNewSamples() {
+
+// Real signals from USRP
+void SignalGui::UsrpSamples() {
+
+}
+
+// Simulated signal generator for testing GUI
+void SignalGui::GenerateSamples() {
 	static std::random_device rd;
 	static std::mt19937 gen(rd());
 	static std::normal_distribution<float> noise(0.0f, 0.1f);
@@ -84,6 +97,7 @@ void SignalGui::GenerateNewSamples() {
 	}
 }
 
+// Simulated signal updater
 void SignalGui::UpdatePlotData() {
 	float dt = 1.0f / sample_rate_;
 	for (int i = 0; i < N_SAMPLES; ++i) {
@@ -98,7 +112,8 @@ void SignalGui::UpdatePlotData() {
 
 void SignalGui::Update() {
 	update_counter_++;
-	GenerateNewSamples();
+	if (mode_ == Mode::SIMULATION) { GenerateSamples(); }
+	else						   { UsrpSamples();		}
 	if (update_counter_ % 4 == 0) {
 		UpdatePlotData();
 	}
@@ -112,6 +127,8 @@ void SignalGui::Update() {
 
 	// Framerate
 	ImGui::Text("FPS: %.2f", ImGui::GetIO().Framerate);
+	ImGui::SameLine();
+	ImGui::Text("Mode: %s", (mode_ == Mode::SIMULATION) ? "SIM" : "USRP");
 
 	// Dimensions of each plot
 	float quarter_width  = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;

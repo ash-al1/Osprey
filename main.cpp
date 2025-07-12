@@ -12,18 +12,57 @@
 #include "imgui/backends/imgui_impl_opengl3.h"
 #include "implot/implot.h"
 #include <GLFW/glfw3.h>
+#include <boost/program_options.hpp>
 #include <iostream>
+#include <string>
 
 #include "SignalGui.h"
-#define WINDOW_WIDTH  900
-#define WINDOW_HEIGHT 600
+#define WINDOW_WIDTH  1200
+#define WINDOW_HEIGHT 800
+
+namespace po = boost::program_options;
 
 static void glfw_error_callback(int error, const char* description) {
 	fprintf(stderr, "GLFW Error %d: %s\n", error, description);
 }
 
-int main() {
-	// You think i have any idea what this does? nope ;]
+int main(int argc, char* argv[]) {
+	std::string mode_str;
+
+	po::options_description desc("Signal detector & Modulation recognition");
+	desc.add_options()
+		("help,h", "Show help message")
+		("mode", po::value<std::string>(&mode_str)->default_value("sim"),
+		 "Signal source mode: 'sim' for simulation, 'usrp' for USRP hardware");
+
+	po::variables_map vm;
+	try	{
+		po::store(po::parse_command_line(argc, argv, desc), vm);
+		po::notify(vm);
+		if (vm.count("help")) {
+			std::cout << desc << std::endl;
+			return 0;
+		}
+	} catch(const po::error& e) {
+		std::cerr << "Error parsing arguments: " << e.what() << std::endl;
+		std::cout << desc << std::endl;
+		return 1;
+	}
+
+	SignalGui::Mode mode;
+	if (mode_str == "sim") {
+		mode = SignalGui::Mode::SIMULATION;
+		std::cout << "Mode: sim" << std::endl;
+	} else if (mode_str == "usrp") {
+		mode = SignalGui::Mode::USRP;
+		std::cout << "Mode: usrp" << std::endl;
+	} else {
+		std::cerr << "Error: Invalid mode " << mode_str << ". Use sim or usrp" << std::endl;
+		std::cout << desc << std::endl;
+		return 1;
+	}
+
+	// GLFW initialization
 	glfwSetErrorCallback(glfw_error_callback);
 	if (!glfwInit())
 		return 1;
@@ -54,7 +93,7 @@ int main() {
 
 	// ImPlot context
 	ImPlot::CreateContext();
-	SignalGui gui;
+	SignalGui gui(mode);
 
 	// Main loop
 	while (!glfwWindowShouldClose(window)) {

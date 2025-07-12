@@ -5,9 +5,15 @@
 #include "CircularBuffer.h"
 
 class SignalGui {
+public:
+	enum class Mode {
+		SIMULATION,
+		USRP,
+	};
+
 private:
-	static constexpr int WINDOW_WIDTH  = 900;
-	static constexpr int WINDOW_HEIGHT = 600;
+	static constexpr int WINDOW_WIDTH  = 1200;
+	static constexpr int WINDOW_HEIGHT = 800;
 
 	static constexpr int N_SAMPLES = 1000;
 	static constexpr int N_FREQ = 512;
@@ -33,6 +39,8 @@ private:
 	float signal_freq_;
 	int update_counter_;
 
+	Mode mode_;
+
 public:
 	SignalGui();
 	~SignalGui();
@@ -40,7 +48,8 @@ public:
 	void Update();
 
 private:
-	void GenerateNewSamples();
+	void GenerateSamples();
+	void UsrpSamples();
 	void UpdatePlotData();
 	void RenderTimeDomainPlot();
 	void RenderFrequencyPlot();
