@@ -67,9 +67,9 @@ public:
 	void SetUsrpSampleRate(double rate_sps) { usrp_sample_rate_ = rate_sps; }
 	void SetUsrpGain(double gain_db) { usrp_gain_ = gain_db; }
 
-	void GetUsrpFrequency() const { return usrp_frequency_; }
-	void GetUsrpSampleRate() const { return usrp_sample_rate_; }
-	void GetUsrpGain() const { return usrp_gain_; }
+	double GetUsrpFrequency() const { return usrp_frequency_; }
+	double GetUsrpSampleRate() const { return usrp_sample_rate_; }
+	double GetUsrpGain() const { return usrp_gain_; }
 
 private:
 	void GenerateSamples();

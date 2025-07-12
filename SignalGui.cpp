@@ -23,12 +23,12 @@ SignalGui::SignalGui(Mode mode)
 	, spectrogram_row_(0)
 	, update_counter_(0)
 	, mode_(mode)
-	, usrp_controller(nullptr)
+	, usrp_controller_(nullptr)
 	, usrp_initialized_(false)
 	, samples_received_(0)
 	, overflow_count_(0)
 	, usrp_frequency_(2.45e9)
-	, usrp_samples_rate_(10e6)
+	, usrp_sample_rate_(10e6)
 	, usrp_gain_(40.0) {
 
 	if (mode_ == Mode::SIMULATION) {
@@ -50,10 +50,11 @@ SignalGui::SignalGui(Mode mode)
 
 // Destructor
 SignalGui::~SignalGui() {
+	ShutdownUsrp();
 }
 
 bool SignalGui::InitializeUsrp() {
-	if (usrp_initialize_.load()) { return true; }
+	if (usrp_initialized_.load()) { return true; }
 
 	try {
 		usrp_controller_ = std::make_unique<UsrpController>();
@@ -84,9 +85,11 @@ bool SignalGui::InitializeUsrp() {
 		usrp_initialized_.store(true);
 		return true;
 	} catch (const std::exception& e) {
-		std::cerr << "Exception during USRP Initialization: " << e.what() << std::endl();
-		return false
+		std::cerr << "Exception during USRP Initialization: " << e.what() << std::endl;
+		usrp_controller_.reset();
+		return false;
 	}
+
 }
 
 void SignalGui::ShutdownUsrp() {
@@ -100,7 +103,7 @@ void SignalGui::ShutdownUsrp() {
 
 // Real signals from USRP
 void SignalGui::UsrpSamples() {
-	if (!usrp_initialized.load() || !usrp_controller_) {
+	if (!usrp_initialized_.load() || !usrp_controller_) {
 		for (int i = 0; i < 64; ++i) { signal_buffer_.Push(0.0f); }
 		return ;
 	}
@@ -129,11 +132,27 @@ void SignalGui::ProcessUsrpSamples(const std::complex<float>* samples, size_t co
 	for (size_t i = 0; i < count; ++i) {
 		float real_sample = samples[i].real();
 		signal_buffer_.Push(real_sample);
-		current_time_ += 1.0f / sample_rate;
+		current_time_ += 1.0f / sample_rate_;
 	}
 }
 
 void SignalGui::UpdateUsrpFrequencyDomain() {
+	float nyquist_freq = sample_rate_ / 2.0f;
+
+	for (int i = 0; i < N_FREQ; ++i) {
+		float freq = (float)i * nyquist_freq / N_FREQ;
+		freq_buffer_.Push(freq);
+
+		float mag = -80.0f + 10.0f * (float(rand()) / RAND_MAX - 0.5f);
+
+		if (usrp_frequency_ > 2.4e9 && usrp_frequency_ < 2.5e9) {
+			if (freq > 1e6 && freq < 5e6) mag = -30.0f + 5.0f * (float(rand()) / RAND_MAX - 0.5f);
+			if (freq > 8e6 && freq < 12e6) mag = -40.0f + 5.0f * (float(rand()) / RAND_MAX - 0.5f);
+		}
+
+		magnitude_buffer_.Push(mag);
+		psd_buffer_.Push(mag - 10.0f);
+	}
 }
 
 void SignalGui::UpdateUsrpWaterfall() {

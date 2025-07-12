@@ -1,18 +1,20 @@
 cmake_minimum_required(VERSION 3.16)
 project(signals)
-
 set(CMAKE_CXX_STANDARD 17)
 
 # Find packages
 find_package(glfw3 REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(Boost REQUIRED COMPONENTS program_options)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(UHD REQUIRED uhd)
 
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/imgui)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/implot)
+include_directories(${UHD_INCLUDE_DIRS})
 
 # ImGui source files
 set(IMGUI_SOURCES
@@ -34,19 +36,21 @@ set(IMPLOT_SOURCES
 # Our application source files
 set(APP_SOURCES
     main.cpp
-	SignalGui.cpp
+    SignalGui.cpp
+    UsrpController.cpp    # ADD THIS LINE
 )
 
 # Create executable
-add_executable(${PROJECT_NAME} 
+add_executable(${PROJECT_NAME}
     ${IMGUI_SOURCES}
     ${IMPLOT_SOURCES}
     ${APP_SOURCES}
 )
 
 # Link libraries
-target_link_libraries(${PROJECT_NAME} 
-    glfw 
+target_link_libraries(${PROJECT_NAME}
+    glfw
     OpenGL::GL
-	Boost::program_options
+    Boost::program_options
+    ${UHD_LIBRARIES}
 )
