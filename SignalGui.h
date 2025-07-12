@@ -42,7 +42,7 @@ private:
 	Mode mode_;
 
 public:
-	SignalGui();
+	SignalGui(Mode mode = Mode::SIMULATION);
 	~SignalGui();
 
 	void Update();

@@ -33,7 +33,7 @@ int main(int argc, char* argv[]) {
 	desc.add_options()
 		("help,h", "Show help message")
 		("mode", po::value<std::string>(&mode_str)->default_value("sim"),
-		 "Signal source mode: 'sim' for simulation, 'usrp' for USRP hardware");
+		 "Mode: simulated or real signals");
 
 	po::variables_map vm;
 	try	{

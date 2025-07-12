@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 # Find packages
 find_package(glfw3 REQUIRED)
 find_package(OpenGL REQUIRED)
+find_package(Boost REQUIRED COMPONENTS program_options)
 
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
@@ -47,4 +48,5 @@ add_executable(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME} 
     glfw 
     OpenGL::GL
+	Boost::program_options
 )

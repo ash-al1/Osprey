@@ -11,7 +11,7 @@
 #include <random>
 
 // Constructor
-SignalGui::SignalGui()
+SignalGui::SignalGui(Mode mode)
 	: time_buffer_(N_SAMPLES)
 	, signal_buffer_(N_SAMPLES)
 	, freq_buffer_(N_FREQ)
