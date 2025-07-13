@@ -7,7 +7,13 @@ find_package(glfw3 REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(Boost REQUIRED COMPONENTS program_options)
 find_package(PkgConfig REQUIRED)
+
+# Core dependencies
 pkg_check_modules(UHD REQUIRED uhd)
+
+# Optional SDR libraries (for future device support)
+pkg_check_modules(RTLSDR rtl-sdr)
+pkg_check_modules(HACKRF hackrf)
 
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
@@ -15,6 +21,17 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/imgui)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/implot)
 include_directories(${UHD_INCLUDE_DIRS})
+
+# Add include directories for optional SDR libraries
+if(RTLSDR_FOUND)
+    include_directories(${RTLSDR_INCLUDE_DIRS})
+    add_definitions(-DHAS_RTLSDR)
+endif()
+
+if(HACKRF_FOUND)
+    include_directories(${HACKRF_INCLUDE_DIRS})
+    add_definitions(-DHAS_HACKRF)
+endif()
 
 # ImGui source files
 set(IMGUI_SOURCES
@@ -33,14 +50,33 @@ set(IMPLOT_SOURCES
     implot/implot_items.cpp
 )
 
-# Our application source files
+# Core SDR HAL sources - THESE WERE MISSING!
+set(CORE_HAL_SOURCES
+    SDRFactory.cpp
+    SimulationDevice.cpp
+    USRPDevice.cpp
+    FFTProcessor.cpp
+)
+
+# Optional device sources
+set(HAL_SOURCES ${CORE_HAL_SOURCES})
+if(RTLSDR_FOUND)
+    list(APPEND HAL_SOURCES RTLSDRDevice.cpp)
+endif()
+
+if(HACKRF_FOUND)
+    list(APPEND HAL_SOURCES HackRFDevice.cpp)
+endif()
+
+# Application source files
 set(APP_SOURCES
     main.cpp
     SignalGui.cpp
-    UsrpController.cpp    # ADD THIS LINE
+    UsrpController.cpp
+    ${HAL_SOURCES}
 )
 
-# Create executable
+# Create main executable
 add_executable(${PROJECT_NAME}
     ${IMGUI_SOURCES}
     ${IMPLOT_SOURCES}
@@ -48,9 +84,56 @@ add_executable(${PROJECT_NAME}
 )
 
 # Link libraries
-target_link_libraries(${PROJECT_NAME}
+set(LINK_LIBRARIES
     glfw
     OpenGL::GL
     Boost::program_options
     ${UHD_LIBRARIES}
+    pthread
 )
+
+# Add optional SDR libraries
+if(RTLSDR_FOUND)
+    list(APPEND LINK_LIBRARIES ${RTLSDR_LIBRARIES})
+endif()
+
+if(HACKRF_FOUND)
+    list(APPEND LINK_LIBRARIES ${HACKRF_LIBRARIES})
+endif()
+
+target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARIES})
+
+# Test programs
+add_executable(test_circular_buffer TestCircularBuffer.cpp)
+add_executable(test_usrp_controller TestUsrpController.cpp UsrpController.cpp)
+target_link_libraries(test_usrp_controller ${UHD_LIBRARIES} pthread)
+
+# HAL test program - FIXED to include all required sources
+add_executable(test_hal 
+    TestHAL.cpp
+    ${HAL_SOURCES}
+    UsrpController.cpp
+)
+target_link_libraries(test_hal 
+    ${UHD_LIBRARIES} 
+    pthread
+)
+
+# Optional: RTL-SDR specific test
+if(RTLSDR_FOUND)
+    add_executable(test_rtlsdr TestRTLSDR.cpp RTLSDRDevice.cpp SDRFactory.cpp)
+    target_link_libraries(test_rtlsdr ${RTLSDR_LIBRARIES} pthread)
+endif()
+
+# Installation rules
+install(TARGETS ${PROJECT_NAME}
+    RUNTIME DESTINATION bin
+)
+
+# Print configuration summary
+message(STATUS "")
+message(STATUS "Configuration Summary:")
+message(STATUS "  UHD (USRP):    Found")
+message(STATUS "  RTL-SDR:       ${RTLSDR_FOUND}")
+message(STATUS "  HackRF:        ${HACKRF_FOUND}")
+message(STATUS "")
