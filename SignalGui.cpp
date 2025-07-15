@@ -86,6 +86,15 @@ bool SignalGui::IsReceiving() const {
 }
 
 void SignalGui::ProcessSamples(const std::complex<float>* samples, size_t count) {
+    // Debug: Check raw sample values from USRP
+    static int sample_debug = 0;
+    if (sample_debug++ % 1000000 == 0) {  // Every ~1 second
+        std::cout << "Raw samples: " << samples[0] << ", " << samples[1] << ", " << samples[2] << std::endl;
+        std::cout << "Magnitudes: " << std::abs(samples[0]) << ", " << std::abs(samples[1]) << ", " << std::abs(samples[2]) << std::endl;
+        std::cout << "Real parts: " << samples[0].real() << ", " << samples[1].real() << ", " << samples[2].real() << std::endl;
+        std::cout << "Imag parts: " << samples[0].imag() << ", " << samples[1].imag() << ", " << samples[2].imag() << std::endl;
+    }
+    
     // Extract real part for time domain display
     for (size_t i = 0; i < count; ++i) {
         float real_sample = samples[i].real();

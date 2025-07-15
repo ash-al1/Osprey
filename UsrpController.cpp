@@ -389,6 +389,7 @@ void UsrpController::ReceiveWorker() {
 		while (!stop_receiving_.load()) {
 			size_t num_rx_samps = rx_stream->recv(&buffer.front(),
 					buffer_size_, md, 1.0);
+
 			// Timeouts may or may not be okay, who the fuck knows
 			if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_TIMEOUT) {
 				continue;
