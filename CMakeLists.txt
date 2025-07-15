@@ -11,9 +11,23 @@ find_package(PkgConfig REQUIRED)
 # Core dependencies
 pkg_check_modules(UHD REQUIRED uhd)
 
-# Optional SDR libraries (for future device support)
+# Optional SDR libraries
 pkg_check_modules(RTLSDR rtl-sdr)
 pkg_check_modules(HACKRF hackrf)
+
+# Try to find PFFFT using pkg-config first, then fallback to manual linking
+pkg_check_modules(PFFFT pffft)
+if(NOT PFFFT_FOUND)
+    # Fallback: assume system installation in standard locations
+    find_library(PFFFT_LIBRARY NAMES PFFFT pffft)
+    find_path(PFFFT_INCLUDE_DIR NAMES pffft.h)
+    
+    if(PFFFT_LIBRARY AND PFFFT_INCLUDE_DIR)
+        set(PFFFT_FOUND TRUE)
+        set(PFFFT_LIBRARIES ${PFFFT_LIBRARY})
+        set(PFFFT_INCLUDE_DIRS ${PFFFT_INCLUDE_DIR})
+    endif()
+endif()
 
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
@@ -21,6 +35,11 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/imgui)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/implot)
 include_directories(${UHD_INCLUDE_DIRS})
+
+# Add PFFFT include directories if found
+if(PFFFT_FOUND)
+    include_directories(${PFFFT_INCLUDE_DIRS})
+endif()
 
 # Add include directories for optional SDR libraries
 if(RTLSDR_FOUND)
@@ -50,7 +69,7 @@ set(IMPLOT_SOURCES
     implot/implot_items.cpp
 )
 
-# Core SDR HAL sources - THESE WERE MISSING!
+# Core SDR HAL sources
 set(CORE_HAL_SOURCES
     SDRFactory.cpp
     SimulationDevice.cpp
@@ -68,7 +87,7 @@ if(HACKRF_FOUND)
     list(APPEND HAL_SOURCES HackRFDevice.cpp)
 endif()
 
-# Application source files
+# Application source files (removed PFFFT_SOURCES)
 set(APP_SOURCES
     main.cpp
     SignalGui.cpp
@@ -90,7 +109,13 @@ set(LINK_LIBRARIES
     Boost::program_options
     ${UHD_LIBRARIES}
     pthread
+    m
 )
+
+# Add PFFFT libraries if found
+if(PFFFT_FOUND)
+    list(APPEND LINK_LIBRARIES ${PFFFT_LIBRARIES})
+endif()
 
 # Add optional SDR libraries
 if(RTLSDR_FOUND)
@@ -108,7 +133,7 @@ add_executable(test_circular_buffer TestCircularBuffer.cpp)
 add_executable(test_usrp_controller TestUsrpController.cpp UsrpController.cpp)
 target_link_libraries(test_usrp_controller ${UHD_LIBRARIES} pthread)
 
-# HAL test program - FIXED to include all required sources
+# HAL test program
 add_executable(test_hal 
     TestHAL.cpp
     ${HAL_SOURCES}
@@ -116,7 +141,9 @@ add_executable(test_hal
 )
 target_link_libraries(test_hal 
     ${UHD_LIBRARIES} 
+	${PFFFT_LIBRARIES}
     pthread
+	m
 )
 
 # Optional: RTL-SDR specific test
@@ -136,4 +163,9 @@ message(STATUS "Configuration Summary:")
 message(STATUS "  UHD (USRP):    Found")
 message(STATUS "  RTL-SDR:       ${RTLSDR_FOUND}")
 message(STATUS "  HackRF:        ${HACKRF_FOUND}")
+message(STATUS "  PFFFT:         ${PFFFT_FOUND}")
+if(PFFFT_FOUND)
+    message(STATUS "  PFFFT Include: ${PFFFT_INCLUDE_DIRS}")
+    message(STATUS "  PFFFT Libs:    ${PFFFT_LIBRARIES}")
+endif()
 message(STATUS "")

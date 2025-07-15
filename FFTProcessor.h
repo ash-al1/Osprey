@@ -1,181 +1,133 @@
 #pragma once
 
-#include <complex>
 #include <vector>
 #include <memory>
-#include <cmath>
+#include <complex>
+
+// Forward declare PFFFT types
+typedef struct PFFFT_Setup PFFFT_Setup;
 
 /**
- * FFT Processor for frequency domain analysis
- * This is a simple interface that can be implemented with different FFT libraries
- * (FFTW, Kiss FFT, etc.)
+ * Simple FFT processor based on Spectrolysis implementation
+ * Uses PFFFT for high-performance real-to-complex transforms
  */
 class FFTProcessor {
 public:
-    enum class WindowType {
-        NONE,
-        HAMMING,
-        HANNING,
-        BLACKMAN,
-        BLACKMAN_HARRIS,
-        FLAT_TOP
-    };
-    
-    FFTProcessor(size_t fft_size);
+    explicit FFTProcessor(int fft_size);
     ~FFTProcessor();
     
-    /**
-     * Process real-valued time domain samples
-     * @param input Real-valued time domain samples
-     * @param output Complex frequency domain output (size = fft_size/2 + 1)
-     */
-    void processReal(const float* input, std::complex<float>* output);
+    // Delete copy constructor and assignment operator
+    FFTProcessor(const FFTProcessor&) = delete;
+    FFTProcessor& operator=(const FFTProcessor&) = delete;
     
     /**
-     * Process complex time domain samples
-     * @param input Complex time domain samples
-     * @param output Complex frequency domain output
+     * Perform forward FFT on real input
+     * @param input_buffer Real input samples (size = fft_size)
+     * @param output_buffer Complex output (size = fft_size, interleaved real/imag)
      */
-    void processComplex(const std::complex<float>* input, std::complex<float>* output);
+    void forwardFFT(const float* input_buffer, float* output_buffer);
     
     /**
-     * Compute magnitude spectrum in dB
-     * @param fft_output Complex FFT output
-     * @param magnitude_db Magnitude in dB (20*log10)
-     * @param size Number of frequency bins
-     * @param normalize If true, normalize to 0 dB max
+     * Convert complex FFT output to real magnitude values
+     * @param real_buffer Output magnitude buffer
+     * @param complex_buffer Complex FFT output from forwardFFT
+     * @param real_buffer_len Length of output buffer (usually fft_size/2 + 1)
+     * @param normalize If true, normalize by 1/2N for amplitude
      */
-    static void computeMagnitudeDB(const std::complex<float>* fft_output, 
-                                   float* magnitude_db, 
-                                   size_t size,
-                                   bool normalize = false);
+    void complexToReal(float* real_buffer, 
+                      const float* complex_buffer,
+                      int real_buffer_len,
+                      bool normalize = false);
     
     /**
-     * Compute power spectral density
-     * @param fft_output Complex FFT output
-     * @param psd Power spectral density output
-     * @param size Number of frequency bins
-     * @param sample_rate Sample rate for proper scaling
-     * @param fft_size FFT size for proper scaling
+     * Convert complex FFT output to dB magnitude values
+     * @param real_buffer Output dB buffer
+     * @param complex_buffer Complex FFT output from forwardFFT
+     * @param real_buffer_len Length of output buffer (usually fft_size/2 + 1)
+     * @param scale If true, scale dB values 0-1 for display
+     * @param floor_db Noise floor level in dB (positive value, will be made negative)
      */
-    static void computePSD(const std::complex<float>* fft_output,
-                          float* psd,
-                          size_t size,
-                          double sample_rate,
-                          size_t fft_size);
+    void complexToRealDB(float* real_buffer, 
+                        const float* complex_buffer,
+                        int real_buffer_len,
+                        bool scale = true,
+                        float floor_db = 80.0f);
     
     /**
-     * Apply window function to time domain data
-     * @param data Input/output data
-     * @param size Data size
-     * @param window_type Type of window to apply
+     * Calculate frequency bin width
+     * @param sample_freq Sample rate in Hz
+     * @return Frequency width per bin in Hz
      */
-    static void applyWindow(float* data, size_t size, WindowType window_type);
-    static void applyWindow(std::complex<float>* data, size_t size, WindowType window_type);
+    float binWidth(float sample_freq) const;
     
     /**
-     * Get window coefficients
-     * @param coeffs Output array for coefficients
-     * @param size Window size
-     * @param window_type Type of window
+     * Generate frequency array for FFT bins
+     * @param freq_array Output frequency array
+     * @param sample_freq Sample rate in Hz
+     * @param freq_len Length of frequency array
+     * @param center_freq Center frequency for SDR-style display (optional)
      */
-    static void getWindowCoefficients(float* coeffs, size_t size, WindowType window_type);
+    void generateFrequencyArray(float* freq_array, 
+                               int sample_freq, 
+                               int freq_len,
+                               double center_freq = 0.0) const;
     
-    /**
-     * Compute window scaling factor for accurate measurements
-     */
-    static float getWindowScalingFactor(WindowType window_type);
-    
-    size_t getFFTSize() const { return fft_size_; }
+    int getFFTSize() const { return fft_size_; }
+    int getNumBins() const { return fft_size_ / 2 + 1; }
     
 private:
-    size_t fft_size_;
+    PFFFT_Setup* setup_;
+    std::vector<float> work_buffer_;
+    int fft_size_;
     
-    // Implementation-specific data (FFTW, Kiss FFT, etc.)
-    // For now, using a simple DFT implementation
-    std::vector<std::complex<float>> twiddle_factors_;
-    std::vector<std::complex<float>> work_buffer_;
-    
-    void initializeTwiddleFactors();
-    void computeDFT(const std::complex<float>* input, std::complex<float>* output);
-	void fftRadix2(std::complex<float>* data, size_t n, bool inverse);
+    void cleanup();
 };
 
 /**
- * Spectrum analyzer for continuous frequency analysis
+ * Simple spectrogram analyzer that processes audio samples
+ * and generates magnitude spectra for display
  */
-class SpectrumAnalyzer {
+class SpectrogramAnalyzer {
 public:
-    struct Config {
-        size_t fft_size = 1024;
-        FFTProcessor::WindowType window_type = FFTProcessor::WindowType::HAMMING;
-        size_t averaging_count = 4;  // Number of FFTs to average
-        float overlap_ratio = 0.5f;  // Overlap between FFT frames (0-1)
-        bool remove_dc = true;       // Remove DC component
-    };
-    
-    SpectrumAnalyzer(const Config& config, double sample_rate);
-    ~SpectrumAnalyzer();
+    SpectrogramAnalyzer(int fft_size, float sample_rate);
+    ~SpectrogramAnalyzer() = default;
     
     /**
-     * Add samples for processing
-     * @param samples Input samples (real or complex)
+     * Process audio samples and update spectrogram
+     * @param samples Input audio samples
      * @param count Number of samples
      */
-    void addSamples(const float* samples, size_t count);
-    void addSamples(const std::complex<float>* samples, size_t count);
+    void processSamples(const float* samples, size_t count);
+    void processSamples(const std::complex<float>* samples, size_t count);
     
     /**
-     * Check if spectrum data is ready
+     * Get the latest magnitude spectrum in dB
+     * @param output Output buffer for magnitude spectrum
+     * @param output_len Length of output buffer
+     * @return true if new data is available
      */
-    bool isSpectrumReady() const;
+    bool getLatestSpectrum(float* output, int output_len);
     
     /**
-     * Get frequency bins
-     * @param frequencies Output array for frequency values
-     * @param count Number of bins (should be <= fft_size/2+1)
+     * Get frequency array for the spectrum bins
+     * @param freq_array Output frequency array
+     * @param freq_len Length of frequency array
+     * @param center_freq Center frequency for SDR-style display (optional)
      */
-    void getFrequencies(float* frequencies, size_t count) const;
+    void getFrequencyArray(float* freq_array, int freq_len, double center_freq = 0.0);
     
-    /**
-     * Get magnitude spectrum
-     * @param magnitude_db Output array for magnitude in dB
-     * @param count Number of bins
-     */
-    void getMagnitudeSpectrum(float* magnitude_db, size_t count);
-    
-    /**
-     * Get power spectral density
-     * @param psd Output array for PSD
-     * @param count Number of bins
-     */
-    void getPowerSpectralDensity(float* psd, size_t count);
-    
-    /**
-     * Reset analyzer state
-     */
-    void reset();
+    int getNumBins() const { return fft_processor_->getNumBins(); }
     
 private:
-    Config config_;
-    double sample_rate_;
-    size_t overlap_samples_;
-    
     std::unique_ptr<FFTProcessor> fft_processor_;
+    std::vector<float> input_buffer_;
+    std::vector<float> fft_output_;
+    std::vector<float> magnitude_buffer_;
     
-    // Circular buffer for input samples
-    std::vector<std::complex<float>> input_buffer_;
-    size_t write_pos_ = 0;
-    size_t samples_available_ = 0;
-    
-    // FFT output and averaging
-    std::vector<std::complex<float>> fft_output_;
-    std::vector<float> magnitude_accumulator_;
-    std::vector<float> psd_accumulator_;
-    size_t averages_accumulated_ = 0;
-    
-    // Window coefficients
-    std::vector<float> window_coeffs_;
+    float sample_rate_;
+    int fft_size_;
+    size_t write_pos_;
+    bool spectrum_ready_;
     
     void processFrame();
 };

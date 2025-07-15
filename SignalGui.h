@@ -15,8 +15,8 @@ private:
     static constexpr int WINDOW_HEIGHT = 800;
 
     static constexpr int N_SAMPLES = 1000;
-    static constexpr int N_FREQ = 512;
-    static constexpr int N_TIME_BINS = 100;
+    static constexpr int N_FREQ = 1024;
+    static constexpr int N_TIME_BINS = 300;
 
     // Plot buffers
     CircularBuffer<float> time_buffer_;
@@ -44,7 +44,8 @@ private:
     std::atomic<size_t> samples_received_;
     std::atomic<size_t> overflow_count_;
 
-	std::unique_ptr<SpectrumAnalyzer> spectrum_analyzer_;
+    // Updated to use new SpectrogramAnalyzer
+    std::unique_ptr<SpectrogramAnalyzer> spectrogram_analyzer_;
     bool spectrum_ready_ = false;
 
 public:
@@ -87,7 +88,4 @@ private:
     void RenderSpectrogramPlot();
     void RenderPowerSpectralDensity();
     void RenderStatusBar();
-    
-    // FFT placeholder (implement with a library like FFTW or kissfft)
-	void ComputeFFT(const float* time_domain, float* freq_domain, float* magnitude, size_t fft_size);
 };

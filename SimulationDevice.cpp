@@ -9,8 +9,11 @@ static SDRDeviceRegistrar<SimulationDevice> sim_registrar_short("sim");
 
 SimulationDevice::SimulationDevice() 
     : rng_(std::random_device{}()) {
-    addTone(50.0, 0.5);
-    addTone(150.0, 0.3);
+    // Better tones for SDR display - spread across bandwidth
+    addTone(-200e3, 0.5);  // 200 kHz below center
+    addTone(150e3, 0.3);   // 150 kHz above center  
+    addTone(50e3, 0.4);    // 50 kHz above center
+    addTone(-350e3, 0.2);  // 350 kHz below center
 }
 
 SimulationDevice::~SimulationDevice() {
@@ -38,6 +41,7 @@ bool SimulationDevice::initialize(const SDRConfig& config) {
     std::cout << "  Frequency: " << frequency_ / 1e6 << " MHz" << std::endl;
     std::cout << "  Sample rate: " << sample_rate_ / 1e6 << " MS/s" << std::endl;
     std::cout << "  Gain: " << gain_ << " dB" << std::endl;
+    std::cout << "  Simulated tones at: -350, -200, +50, +150 kHz offsets" << std::endl;
     
     return true;
 }
@@ -262,6 +266,8 @@ void SimulationDevice::generateMultitoneSamples(std::complex<float>* buffer,
     for (size_t i = 0; i < count; ++i) {
         float real = 0.0f;
         float imag = 0.0f;
+        
+        // Generate fixed tones
         for (auto& tone : tones_) {
             double phase_increment = 2.0 * M_PI * tone.frequency * dt;
             real += tone.amplitude * std::cos(tone.phase);
@@ -272,8 +278,23 @@ void SimulationDevice::generateMultitoneSamples(std::complex<float>* buffer,
                 tone.phase -= 2.0 * M_PI;
             }
         }
+        
+        // Add a sweeping tone that moves across the spectrum
+        double sweep_freq = 300e3 * std::sin(time * 0.05);  // ±300kHz sweep, slow
+        double sweep_phase = 2.0 * M_PI * sweep_freq * time;
+        real += 0.3f * std::cos(sweep_phase);
+        imag += 0.3f * std::sin(sweep_phase);
+        
+        // Add some bandwidth around center frequency
+        double wide_signal_freq = 100e3 * (noise_dist_(rng_) * 0.1);  // ±10kHz random
+        double wide_phase = 2.0 * M_PI * wide_signal_freq * time;
+        real += 0.1f * std::cos(wide_phase);
+        imag += 0.1f * std::sin(wide_phase);
+        
+        // Add noise
         real += noise_level_ * noise_dist_(rng_);
         imag += noise_level_ * noise_dist_(rng_);
+        
         buffer[i] = std::complex<float>(real * gain_linear, imag * gain_linear);
         time += dt;
     }
@@ -293,9 +314,9 @@ void SimulationDevice::generateFMSamples(std::complex<float>* buffer,
                                          size_t count, double& time) {
     const double dt = 1.0 / sample_rate_;
     const double gain_linear = std::pow(10.0, gain_ / 20.0);
-    const double carrier_freq = 1e3;
-    const double mod_freq = 100.0;
-    const double mod_index = 5.0;
+    const double carrier_freq = 1e5;  // 100 kHz offset
+    const double mod_freq = 1e3;      // 1 kHz modulation
+    const double mod_index = 50e3;    // 50 kHz deviation
     
     static double carrier_phase = 0.0;
     
@@ -323,8 +344,8 @@ void SimulationDevice::generateAMSamples(std::complex<float>* buffer,
                                          size_t count, double& time) {
     const double dt = 1.0 / sample_rate_;
     const double gain_linear = std::pow(10.0, gain_ / 20.0);
-    const double carrier_freq = 1e3;
-    const double mod_freq = 100.0;
+    const double carrier_freq = 200e3;  // 200 kHz offset
+    const double mod_freq = 5e3;        // 5 kHz modulation
     const double mod_depth = 0.8;
     
     for (size_t i = 0; i < count; ++i) {

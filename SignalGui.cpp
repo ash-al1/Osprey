@@ -47,18 +47,12 @@ bool SignalGui::Initialize(const SDRConfig& config) {
     // Update sample rate from device
     sample_rate_ = static_cast<float>(sdr_device_->getSampleRate());
     
-    // Initialize spectrum analyzer
-    SpectrumAnalyzer::Config spectrum_config;
-    spectrum_config.fft_size = N_FREQ * 2;  // Use larger FFT for better resolution
-    spectrum_config.window_type = FFTProcessor::WindowType::HAMMING;
-    spectrum_config.averaging_count = 4;
-    spectrum_config.overlap_ratio = 0.5f;
-    spectrum_config.remove_dc = true;
-    
-    spectrum_analyzer_ = std::make_unique<SpectrumAnalyzer>(spectrum_config, sample_rate_);
+    // Initialize spectrogram analyzer with new PFFFT-based system
+    int fft_size = 2048;  // Good balance of resolution and performance
+    spectrogram_analyzer_ = std::make_unique<SpectrogramAnalyzer>(fft_size, sample_rate_);
     
     std::cout << "SignalGui initialized with " << sdr_device_->getDeviceType() 
-              << " device" << std::endl;
+              << " device, FFT size: " << fft_size << std::endl;
     
     return true;
 }
@@ -99,12 +93,11 @@ void SignalGui::ProcessSamples(const std::complex<float>* samples, size_t count)
         current_time_ += 1.0f / sample_rate_;
     }
     
-	/**
-    // Feed samples to spectrum analyzer
-    if (spectrum_analyzer_) {
-        spectrum_analyzer_->addSamples(samples, count);
-        spectrum_ready_ = spectrum_analyzer_->isSpectrumReady();
-    }*/
+    // Feed samples to spectrogram analyzer
+    if (spectrogram_analyzer_) {
+        spectrogram_analyzer_->processSamples(samples, count);
+        // Note: spectrum_ready_ will be updated in UpdateFrequencyDomain()
+    }
     
     samples_received_.fetch_add(count);
     
@@ -169,7 +162,7 @@ void SignalGui::Update() {
     ImGui::EndChild();
     ImGui::SameLine();
     
-    // Bottom Right - PSD
+    // Bottom Right - PSD (keeping for now, but will show same as frequency)
     ImGui::BeginChild("PSD", ImVec2(quarter_width, quarter_height), true);
     RenderPowerSpectralDensity();
     ImGui::EndChild();
@@ -230,8 +223,8 @@ void SignalGui::UpdatePlotData() {
 }
 
 void SignalGui::UpdateFrequencyDomain() {
-    if (!spectrum_analyzer_ || !spectrum_ready_) {
-        // Use placeholder data if spectrum not ready
+    if (!spectrogram_analyzer_) {
+        // Use placeholder data if analyzer not ready
         float nyquist_freq = sample_rate_ / 2.0f;
         
         for (int i = 0; i < N_FREQ; ++i) {
@@ -245,28 +238,50 @@ void SignalGui::UpdateFrequencyDomain() {
         return;
     }
     
-    // Get real FFT results
-    std::vector<float> frequencies(N_FREQ);
+    // Try to get latest spectrum from analyzer
     std::vector<float> magnitudes(N_FREQ);
-    std::vector<float> psd_values(N_FREQ);
+    spectrum_ready_ = spectrogram_analyzer_->getLatestSpectrum(magnitudes.data(), N_FREQ);
     
-    spectrum_analyzer_->getFrequencies(frequencies.data(), N_FREQ);
-    spectrum_analyzer_->getMagnitudeSpectrum(magnitudes.data(), N_FREQ);
-    spectrum_analyzer_->getPowerSpectralDensity(psd_values.data(), N_FREQ);
-    
-    // Update buffers
-    for (int i = 0; i < N_FREQ; ++i) {
-        freq_buffer_.Push(frequencies[i]);
-        magnitude_buffer_.Push(magnitudes[i]);
-        psd_buffer_.Push(psd_values[i]);
+    if (spectrum_ready_) {
+        // Generate frequency array with center frequency for SDR-style display
+        std::vector<float> frequencies(N_FREQ);
+        double center_freq = sdr_device_ ? sdr_device_->getFrequency() : 0.0;
+        spectrogram_analyzer_->getFrequencyArray(frequencies.data(), N_FREQ, center_freq);
+        
+        // Debug output to check data flow
+        static int debug_counter = 0;
+        if (debug_counter++ % 60 == 0) {  // Print every ~2 seconds
+            std::cout << "Spectrum update: center=" << center_freq/1e6 << "MHz, "
+                      << "first mag=" << magnitudes[0] << ", "
+                      << "mid mag=" << magnitudes[N_FREQ/2] << ", "
+                      << "freq range=" << frequencies[0]/1e6 << " to " << frequencies[N_FREQ-1]/1e6 << "MHz"
+                      << std::endl;
+        }
+        
+        // Update buffers with real data
+        for (int i = 0; i < N_FREQ; ++i) {
+            freq_buffer_.Push(frequencies[i]);
+            magnitude_buffer_.Push(magnitudes[i]);
+            psd_buffer_.Push(magnitudes[i]);  // Use same data for PSD plot
+        }
+    } else {
+        // Use placeholder data if no new spectrum available
+        float nyquist_freq = sample_rate_ / 2.0f;
+        
+        for (int i = 0; i < N_FREQ; ++i) {
+            float freq = (float)i * nyquist_freq / N_FREQ;
+            freq_buffer_.Push(freq);
+            
+            float mag = -80.0f + 10.0f * (float(rand()) / RAND_MAX - 0.5f);
+            magnitude_buffer_.Push(mag);
+            psd_buffer_.Push(mag - 10.0f);
+        }
     }
-    
-    spectrum_ready_ = false;  // Reset for next cycle
 }
 
 void SignalGui::UpdateWaterfall() {
     // Use the current magnitude data for waterfall
-    if (magnitude_buffer_.Size() >= N_FREQ) {
+    if (spectrum_ready_ && magnitude_buffer_.Size() >= N_FREQ) {
         std::vector<float> current_magnitudes(N_FREQ);
         magnitude_buffer_.CopyLatest(current_magnitudes.data(), N_FREQ);
         
@@ -275,25 +290,19 @@ void SignalGui::UpdateWaterfall() {
             spectrogram_data[spectrogram_row_][f] = current_magnitudes[f];
         }
         spectrogram_row_ = (spectrogram_row_ + 1) % N_TIME_BINS;
-    } else {
-        // Fallback to placeholder if no data
-        float nyquist_freq = sample_rate_ / 2.0f;
         
+        // Debug: check if we're getting reasonable values
+        static int waterfall_debug = 0;
+        if (waterfall_debug++ % 100 == 0) {
+            float min_val = *std::min_element(current_magnitudes.begin(), current_magnitudes.end());
+            float max_val = *std::max_element(current_magnitudes.begin(), current_magnitudes.end());
+            std::cout << "Waterfall update: row=" << spectrogram_row_ 
+                      << ", mag range=" << min_val << " to " << max_val << "dB" << std::endl;
+        }
+    } else {
+        // Fallback to placeholder if no data - but use better values
         for (int f = 0; f < N_FREQ; ++f) {
-            float freq = (float)f * nyquist_freq / N_FREQ;
-            float intensity = -80.0f;
-            
-            if (GetDeviceType() == "simulation" || GetDeviceType() == "sim") {
-                float varying_freq = 50.0f + 15.0f * std::sin(current_time_ * 0.3f);
-                if (std::abs(freq - varying_freq) < 8.0f) {
-                    intensity = -20.0f;
-                }
-                if (std::abs(freq - 150.0f) < 5.0f) {
-                    intensity = -30.0f;
-                }
-            }
-            
-            intensity += 5.0f * (float(rand()) / RAND_MAX - 0.5f);
+            float intensity = -70.0f + 5.0f * (float(rand()) / RAND_MAX - 0.5f);
             spectrogram_data[spectrogram_row_][f] = intensity;
         }
         spectrogram_row_ = (spectrogram_row_ + 1) % N_TIME_BINS;
@@ -302,9 +311,44 @@ void SignalGui::UpdateWaterfall() {
 
 void SignalGui::RenderTimeDomainPlot() {
     ImGui::Text("Time domain");
-    if (ImPlot::BeginPlot("##TimePlot", ImVec2(-1, -1))) {
-        ImPlot::SetupAxes("Time [s]", "Amplitude");
-        ImPlot::SetupAxesLimits(0.0, 1.0, -1.5, 1.5, ImGuiCond_Always);
+    if (ImPlot::BeginPlot("##TimePlot", ImVec2(-1, -1), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText)) {
+        // Debug: Check if we have signal data
+        static int time_debug = 0;
+        if (time_debug++ % 120 == 0) {  // Every ~4 seconds
+            std::cout << "Time domain debug: buffer_size=" << signal_buffer_.Size() 
+                      << ", first_sample=" << signal_data[0] 
+                      << ", mid_sample=" << signal_data[N_SAMPLES/2] << std::endl;
+        }
+        
+        // Auto-scale Y axis to signal data with fallback
+        float min_amp = -1.0f, max_amp = 1.0f;
+        if (signal_buffer_.Size() >= N_SAMPLES) {
+            min_amp = signal_data[0];
+            max_amp = signal_data[0];
+            for (int i = 0; i < N_SAMPLES; ++i) {
+                if (signal_data[i] < min_amp) min_amp = signal_data[i];
+                if (signal_data[i] > max_amp) max_amp = signal_data[i];
+            }
+            // Add some padding
+            float range = max_amp - min_amp;
+            if (range > 0.001f) {  // Only scale if we have reasonable range
+                float padding = range * 0.1f;
+                min_amp -= padding;
+                max_amp += padding;
+            } else {
+                // Fallback if range is too small
+                min_amp = -0.1f;
+                max_amp = 0.1f;
+            }
+        }
+        
+        // Calculate correct time range for the samples
+        float time_duration = float(N_SAMPLES) / sample_rate_;  // Actual duration of samples
+        
+        ImPlot::SetupAxes("Time [s]", "Amplitude", 
+                         ImPlotAxisFlags_NoMenus | ImPlotAxisFlags_Lock,
+                         ImPlotAxisFlags_NoMenus | ImPlotAxisFlags_Lock);
+        ImPlot::SetupAxesLimits(0.0, time_duration, min_amp, max_amp, ImGuiCond_Always);
         
         float rel_time[N_SAMPLES];
         for (int i = 0; i < N_SAMPLES; ++i) {
@@ -318,12 +362,31 @@ void SignalGui::RenderTimeDomainPlot() {
 
 void SignalGui::RenderFrequencyPlot() {
     ImGui::Text("Frequency domain");
-    if (ImPlot::BeginPlot("##FreqPlot", ImVec2(-1, -1))) {
-        ImPlot::SetupAxes("Frequency [Hz]", "Magnitude [dB]");
+    if (ImPlot::BeginPlot("##FreqPlot", ImVec2(-1, -1), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText)) {
+        // Auto-scale Y axis to data
+        float min_mag = -80.0f, max_mag = -10.0f;
+        if (magnitude_buffer_.Size() > 0) {
+            min_mag = magnitude_data[0];
+            max_mag = magnitude_data[0];
+            for (int i = 0; i < N_FREQ; ++i) {
+                if (magnitude_data[i] < min_mag) min_mag = magnitude_data[i];
+                if (magnitude_data[i] > max_mag) max_mag = magnitude_data[i];
+            }
+            // Add some padding
+            float padding = (max_mag - min_mag) * 0.1f;
+            min_mag -= padding;
+            max_mag += padding;
+        }
         
-        // Set appropriate frequency range based on sample rate
-        float max_freq = std::min(sample_rate_ / 2.0f, 250.0f);
-        ImPlot::SetupAxesLimits(0, max_freq, -80, 0);
+        // Set frequency range and disable interactions
+        double center_freq = sdr_device_ ? sdr_device_->getFrequency() : 0.0;
+        float freq_min = center_freq;
+        float freq_max = center_freq + sample_rate_ / 2.0f;
+        
+        ImPlot::SetupAxes("Frequency [Hz]", "Magnitude [dB]", 
+                         ImPlotAxisFlags_NoMenus | ImPlotAxisFlags_Lock,
+                         ImPlotAxisFlags_NoMenus | ImPlotAxisFlags_Lock);
+        ImPlot::SetupAxesLimits(freq_min, freq_max, min_mag, max_mag, ImGuiCond_Always);
         
         ImPlot::PlotLine("Magnitude", freq_data, magnitude_data, N_FREQ);
         ImPlot::EndPlot();
@@ -332,28 +395,64 @@ void SignalGui::RenderFrequencyPlot() {
 
 void SignalGui::RenderSpectrogramPlot() {
     ImGui::Text("Waterfall");
-    if (ImPlot::BeginPlot("##SpectrogramPlot", ImVec2(-1, -1))) {
-        ImPlot::SetupAxes("Frequency [Hz]", "Time", ImPlotAxisFlags_None, ImPlotAxisFlags_Invert);
-        ImPlot::SetupAxesLimits(0, sample_rate_/2.0, 0, N_TIME_BINS);
+    if (ImPlot::BeginPlot("##SpectrogramPlot", ImVec2(-1, -1), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText)) {
+        // Auto-scale colormap to actual data range
+        float min_val = -80.0f, max_val = -10.0f;
+        for (int t = 0; t < N_TIME_BINS; ++t) {
+            for (int f = 0; f < N_FREQ; ++f) {
+                if (spectrogram_data[t][f] < min_val) min_val = spectrogram_data[t][f];
+                if (spectrogram_data[t][f] > max_val) max_val = spectrogram_data[t][f];
+            }
+        }
+        
+        // Calculate frequency range and lock axes
+        double center_freq = sdr_device_ ? sdr_device_->getFrequency() : 0.0;
+        float freq_min = center_freq;
+        float freq_max = center_freq + sample_rate_ / 2.0f;
+        
+        ImPlot::SetupAxes("Frequency [Hz]", "Time", 
+                         ImPlotAxisFlags_NoMenus | ImPlotAxisFlags_Lock, 
+                         ImPlotAxisFlags_NoMenus | ImPlotAxisFlags_Lock | ImPlotAxisFlags_Invert);
+        ImPlot::SetupAxesLimits(freq_min, freq_max, 0, N_TIME_BINS, ImGuiCond_Always);
         
         ImPlot::PlotHeatmap("##Waterfall",
                            (float*)spectrogram_data,
                            N_TIME_BINS, N_FREQ,
-                           -80.0, -10.0,
+                           min_val, max_val,
                            nullptr,
-                           ImPlotPoint(0, 0),
-                           ImPlotPoint(sample_rate_/2.0, N_TIME_BINS));
+                           ImPlotPoint(freq_min, 0),
+                           ImPlotPoint(freq_max, N_TIME_BINS));
         ImPlot::EndPlot();
     }
 }
 
 void SignalGui::RenderPowerSpectralDensity() {
     ImGui::Text("Power spectral density");
-    if (ImPlot::BeginPlot("##PSDPlot", ImVec2(-1, -1))) {
-        ImPlot::SetupAxes("Frequency [Hz]", "PSD [dB/Hz]");
+    if (ImPlot::BeginPlot("##PSDPlot", ImVec2(-1, -1), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText)) {
+        // Auto-scale Y axis to PSD data
+        float min_psd = -100.0f, max_psd = -20.0f;
+        if (psd_buffer_.Size() > 0) {
+            min_psd = psd_data[0];
+            max_psd = psd_data[0];
+            for (int i = 0; i < N_FREQ; ++i) {
+                if (psd_data[i] < min_psd) min_psd = psd_data[i];
+                if (psd_data[i] > max_psd) max_psd = psd_data[i];
+            }
+            // Add some padding
+            float padding = (max_psd - min_psd) * 0.1f;
+            min_psd -= padding;
+            max_psd += padding;
+        }
         
-        float max_freq = std::min(sample_rate_ / 2.0f, 250.0f);
-        ImPlot::SetupAxesLimits(0, max_freq, -90, -20);
+        // Set frequency range and disable interactions  
+        double center_freq = sdr_device_ ? sdr_device_->getFrequency() : 0.0;
+        float freq_min = center_freq;
+        float freq_max = center_freq + sample_rate_ / 2.0f;
+        
+        ImPlot::SetupAxes("Frequency [Hz]", "PSD [dB/Hz]", 
+                         ImPlotAxisFlags_NoMenus | ImPlotAxisFlags_Lock,
+                         ImPlotAxisFlags_NoMenus | ImPlotAxisFlags_Lock);
+        ImPlot::SetupAxesLimits(freq_min, freq_max, min_psd, max_psd, ImGuiCond_Always);
         
         ImPlot::PlotLine("PSD", freq_data, psd_data, N_FREQ);
         ImPlot::EndPlot();
@@ -379,15 +478,9 @@ bool SignalGui::SetSampleRate(double rate_sps) {
         device_config_.sample_rate = rate_sps;
         sample_rate_ = static_cast<float>(rate_sps);
         
-        // Recreate spectrum analyzer with new sample rate
-        SpectrumAnalyzer::Config spectrum_config;
-        spectrum_config.fft_size = N_FREQ * 2;
-        spectrum_config.window_type = FFTProcessor::WindowType::HAMMING;
-        spectrum_config.averaging_count = 4;
-        spectrum_config.overlap_ratio = 0.5f;
-        spectrum_config.remove_dc = true;
-        
-        spectrum_analyzer_ = std::make_unique<SpectrumAnalyzer>(spectrum_config, sample_rate_);
+        // Recreate spectrogram analyzer with new sample rate
+        int fft_size = 2048;
+        spectrogram_analyzer_ = std::make_unique<SpectrogramAnalyzer>(fft_size, sample_rate_);
     }
     return success;
 }
