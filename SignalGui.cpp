@@ -86,15 +86,6 @@ bool SignalGui::IsReceiving() const {
 }
 
 void SignalGui::ProcessSamples(const std::complex<float>* samples, size_t count) {
-    // Debug: Check raw sample values from USRP
-    static int sample_debug = 0;
-    if (sample_debug++ % 1000000 == 0) {  // Every ~1 second
-        std::cout << "Raw samples: " << samples[0] << ", " << samples[1] << ", " << samples[2] << std::endl;
-        std::cout << "Magnitudes: " << std::abs(samples[0]) << ", " << std::abs(samples[1]) << ", " << std::abs(samples[2]) << std::endl;
-        std::cout << "Real parts: " << samples[0].real() << ", " << samples[1].real() << ", " << samples[2].real() << std::endl;
-        std::cout << "Imag parts: " << samples[0].imag() << ", " << samples[1].imag() << ", " << samples[2].imag() << std::endl;
-    }
-    
     // Extract real part for time domain display
     for (size_t i = 0; i < count; ++i) {
         float real_sample = samples[i].real();
@@ -127,16 +118,16 @@ void SignalGui::Update() {
         StartReceiving();
     }
     
-    // Update plot data periodically
-    if (update_counter_ % 4 == 0) {
+    // Update plot data periodically - faster updates for smooth waterfall
+    if (update_counter_ % 2 == 0) {   // Every 2 frames instead of 4
         UpdatePlotData();
     }
     
-    if (update_counter_ % 8 == 0) {
+    if (update_counter_ % 4 == 0) {   // Every 4 frames instead of 8  
         UpdateFrequencyDomain();
     }
     
-    if (update_counter_ % 16 == 0) {
+    if (update_counter_ % 4 == 0) {   // Every 4 frames instead of 16 - much faster waterfall!
         UpdateWaterfall();
     }
     
@@ -257,16 +248,6 @@ void SignalGui::UpdateFrequencyDomain() {
         double center_freq = sdr_device_ ? sdr_device_->getFrequency() : 0.0;
         spectrogram_analyzer_->getFrequencyArray(frequencies.data(), N_FREQ, center_freq);
         
-        // Debug output to check data flow
-        static int debug_counter = 0;
-        if (debug_counter++ % 60 == 0) {  // Print every ~2 seconds
-            std::cout << "Spectrum update: center=" << center_freq/1e6 << "MHz, "
-                      << "first mag=" << magnitudes[0] << ", "
-                      << "mid mag=" << magnitudes[N_FREQ/2] << ", "
-                      << "freq range=" << frequencies[0]/1e6 << " to " << frequencies[N_FREQ-1]/1e6 << "MHz"
-                      << std::endl;
-        }
-        
         // Update buffers with real data
         for (int i = 0; i < N_FREQ; ++i) {
             freq_buffer_.Push(frequencies[i]);
@@ -299,15 +280,6 @@ void SignalGui::UpdateWaterfall() {
             spectrogram_data[spectrogram_row_][f] = current_magnitudes[f];
         }
         spectrogram_row_ = (spectrogram_row_ + 1) % N_TIME_BINS;
-        
-        // Debug: check if we're getting reasonable values
-        static int waterfall_debug = 0;
-        if (waterfall_debug++ % 100 == 0) {
-            float min_val = *std::min_element(current_magnitudes.begin(), current_magnitudes.end());
-            float max_val = *std::max_element(current_magnitudes.begin(), current_magnitudes.end());
-            std::cout << "Waterfall update: row=" << spectrogram_row_ 
-                      << ", mag range=" << min_val << " to " << max_val << "dB" << std::endl;
-        }
     } else {
         // Fallback to placeholder if no data - but use better values
         for (int f = 0; f < N_FREQ; ++f) {
@@ -321,14 +293,6 @@ void SignalGui::UpdateWaterfall() {
 void SignalGui::RenderTimeDomainPlot() {
     ImGui::Text("Time domain");
     if (ImPlot::BeginPlot("##TimePlot", ImVec2(-1, -1), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText)) {
-        // Debug: Check if we have signal data
-        static int time_debug = 0;
-        if (time_debug++ % 120 == 0) {  // Every ~4 seconds
-            std::cout << "Time domain debug: buffer_size=" << signal_buffer_.Size() 
-                      << ", first_sample=" << signal_data[0] 
-                      << ", mid_sample=" << signal_data[N_SAMPLES/2] << std::endl;
-        }
-        
         // Auto-scale Y axis to signal data with fallback
         float min_amp = -1.0f, max_amp = 1.0f;
         if (signal_buffer_.Size() >= N_SAMPLES) {
