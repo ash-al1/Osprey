@@ -111,6 +111,68 @@ void FFTProcessor::complexToRealDB(float* real_buffer,
     }
 }
 
+void FFTProcessor::complexToPSD(float* psd_buffer,
+                               const float* complex_buffer,
+                               int psd_buffer_len,
+                               float sample_rate,
+                               bool db_scale,
+                               float floor_db) {
+
+    const float epsilon = 1e-20f; // Small value to avoid log(0)
+
+    // PSD normalization factor: 1 / (Fs * N)
+    // For one-sided PSD, we multiply by 2 (except for DC and Nyquist)
+    float psd_scale = 1.0f / (sample_rate * fft_size_);
+
+    // DC component (index 0 in complex_buffer)
+    float power = complex_buffer[0] * complex_buffer[0];
+    float psd = power * psd_scale; // No factor of 2 for DC
+    psd = fmaxf(psd, epsilon);
+
+    if (db_scale) {
+        float psd_db = 10.0f * log10f(psd);
+        psd_db = fmaxf(psd_db, -floor_db);
+        psd_buffer[0] = psd_db;
+    } else {
+        psd_buffer[0] = psd;
+    }
+
+    // Nyquist component (index 1 in complex_buffer, maps to fft_size_/2)
+    if (psd_buffer_len >= fft_size_ / 2 + 1) {
+        power = complex_buffer[1] * complex_buffer[1];
+        psd = power * psd_scale; // No factor of 2 for Nyquist
+        psd = fmaxf(psd, epsilon);
+
+        if (db_scale) {
+            float psd_db = 10.0f * log10f(psd);
+            psd_db = fmaxf(psd_db, -floor_db);
+            psd_buffer[fft_size_ / 2] = psd_db;
+        } else {
+            psd_buffer[fft_size_ / 2] = psd;
+        }
+    }
+
+    // Process the rest of the frequencies (positive frequencies only)
+    // These get factor of 2 for one-sided PSD
+    for (int i = 1; i < fft_size_ / 2 && i < psd_buffer_len; ++i) {
+        float real = complex_buffer[2 * i];
+        float imag = complex_buffer[2 * i + 1];
+        power = real * real + imag * imag;
+
+        // Factor of 2 for one-sided PSD (double the power from negative frequencies)
+        psd = 2.0f * power * psd_scale;
+        psd = fmaxf(psd, epsilon);
+
+        if (db_scale) {
+            float psd_db = 10.0f * log10f(psd);
+            psd_db = fmaxf(psd_db, -floor_db);
+            psd_buffer[i] = psd_db;
+        } else {
+            psd_buffer[i] = psd;
+        }
+    }
+}
+
 float FFTProcessor::binWidth(float sample_freq) const {
     return sample_freq / fft_size_;
 }
@@ -140,14 +202,16 @@ SpectrogramAnalyzer::SpectrogramAnalyzer(int fft_size, float sample_rate)
     : sample_rate_(sample_rate)
     , fft_size_(fft_size)
     , write_pos_(0)
-    , spectrum_ready_(false) {
+    , spectrum_ready_(false)
+	, psd_ready_(false) {
     
     fft_processor_ = std::make_unique<FFTProcessor>(fft_size);
     
     // Allocate buffers
-    input_buffer_.resize(fft_size * 2);  // Double buffer for continuous processing
+    input_buffer_.resize(fft_size * 2);
     fft_output_.resize(fft_size);
     magnitude_buffer_.resize(fft_processor_->getNumBins());
+	psd_buffer_.resize(fft_processor_->getNumBins());
     
     std::cout << "SpectrogramAnalyzer initialized: FFT=" << fft_size 
               << ", bins=" << fft_processor_->getNumBins() << std::endl;
@@ -196,10 +260,18 @@ void SpectrogramAnalyzer::processFrame() {
     fft_processor_->complexToRealDB(magnitude_buffer_.data(), 
                                    fft_output_.data(),
                                    magnitude_buffer_.size(),
-                                   false,  // scale for display
-                                   80.0f); // 80dB noise floor
+                                   false,  // no scale
+                                   80.0f);
+
+	fft_processor_->complexToPSD(psd_buffer_.data(),
+                                fft_output_.data(),
+                                psd_buffer_.size(),
+                                sample_rate_,
+                                false,   // scale
+                                80.0f);
     
     spectrum_ready_ = true;
+	psd_ready_ = true;
 }
 
 bool SpectrogramAnalyzer::getLatestSpectrum(float* output, int output_len) {
@@ -211,6 +283,24 @@ bool SpectrogramAnalyzer::getLatestSpectrum(float* output, int output_len) {
     std::memcpy(output, magnitude_buffer_.data(), copy_len * sizeof(float));
     
     spectrum_ready_ = false;  // Mark as consumed
+    return true;
+}
+
+bool SpectrogramAnalyzer::getLatestPSD(float* output, int output_len, bool db_scale) {
+    if (!psd_ready_) {
+        return false;
+    }
+    if (db_scale) {
+        int copy_len = std::min(output_len, static_cast<int>(psd_buffer_.size()));
+        std::memcpy(output, psd_buffer_.data(), copy_len * sizeof(float));
+    } else {
+        // Convert from dB back to linear if needed
+        // For now, just copy dB values - linear conversion can be added later if needed
+        int copy_len = std::min(output_len, static_cast<int>(psd_buffer_.size()));
+        std::memcpy(output, psd_buffer_.data(), copy_len * sizeof(float));
+    }
+
+    psd_ready_ = false;  // Mark as consumed
     return true;
 }
 

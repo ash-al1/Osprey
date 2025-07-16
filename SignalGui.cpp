@@ -226,42 +226,52 @@ void SignalGui::UpdateFrequencyDomain() {
     if (!spectrogram_analyzer_) {
         // Use placeholder data if analyzer not ready
         float nyquist_freq = sample_rate_ / 2.0f;
-        
+
         for (int i = 0; i < N_FREQ; ++i) {
             float freq = (float)i * nyquist_freq / N_FREQ;
             freq_buffer_.Push(freq);
-            
+
             float mag = -80.0f + 10.0f * (float(rand()) / RAND_MAX - 0.5f);
             magnitude_buffer_.Push(mag);
             psd_buffer_.Push(mag - 10.0f);
         }
         return;
     }
-    
+
     // Try to get latest spectrum from analyzer
     std::vector<float> magnitudes(N_FREQ);
     spectrum_ready_ = spectrogram_analyzer_->getLatestSpectrum(magnitudes.data(), N_FREQ);
-    
+
+    // Try to get latest PSD from analyzer
+    std::vector<float> psd_values(N_FREQ);
+    bool psd_ready = spectrogram_analyzer_->getLatestPSD(psd_values.data(), N_FREQ, true); // dB scale
+
     if (spectrum_ready_) {
         // Generate frequency array with center frequency for SDR-style display
         std::vector<float> frequencies(N_FREQ);
         double center_freq = sdr_device_ ? sdr_device_->getFrequency() : 0.0;
         spectrogram_analyzer_->getFrequencyArray(frequencies.data(), N_FREQ, center_freq);
-        
+
         // Update buffers with real data
         for (int i = 0; i < N_FREQ; ++i) {
             freq_buffer_.Push(frequencies[i]);
             magnitude_buffer_.Push(magnitudes[i]);
-            psd_buffer_.Push(magnitudes[i]);  // Use same data for PSD plot
+
+            // Use proper PSD if available, otherwise fallback to magnitude - 10dB
+            if (psd_ready && i < static_cast<int>(psd_values.size())) {
+                psd_buffer_.Push(psd_values[i]);
+            } else {
+                psd_buffer_.Push(magnitudes[i] - 10.0f); // Fallback
+            }
         }
     } else {
         // Use placeholder data if no new spectrum available
         float nyquist_freq = sample_rate_ / 2.0f;
-        
+
         for (int i = 0; i < N_FREQ; ++i) {
             float freq = (float)i * nyquist_freq / N_FREQ;
             freq_buffer_.Push(freq);
-            
+
             float mag = -80.0f + 10.0f * (float(rand()) / RAND_MAX - 0.5f);
             magnitude_buffer_.Push(mag);
             psd_buffer_.Push(mag - 10.0f);

@@ -54,6 +54,22 @@ public:
                         float floor_db = 80.0f);
     
     /**
+     * Convert complex FFT output to Power Spectral Density (PSD) values
+     * @param psd_buffer Output PSD buffer
+     * @param complex_buffer Complex FFT output from forwardFFT
+     * @param psd_buffer_len Length of output buffer (usually fft_size/2 + 1)
+     * @param sample_rate Sampling frequency in Hz
+     * @param db_scale If true, return PSD in dB (10*log10), otherwise linear
+     * @param floor_db Noise floor level in dB for dB scale (positive value)
+     */
+    void complexToPSD(float* psd_buffer, 
+                     const float* complex_buffer,
+                     int psd_buffer_len,
+                     float sample_rate,
+                     bool db_scale = true,
+                     float floor_db = 80.0f);
+    
+    /**
      * Calculate frequency bin width
      * @param sample_freq Sample rate in Hz
      * @return Frequency width per bin in Hz
@@ -109,6 +125,15 @@ public:
     bool getLatestSpectrum(float* output, int output_len);
     
     /**
+     * Get the latest PSD spectrum
+     * @param output Output buffer for PSD spectrum
+     * @param output_len Length of output buffer
+     * @param db_scale If true, return PSD in dB
+     * @return true if new data is available
+     */
+    bool getLatestPSD(float* output, int output_len, bool db_scale = true);
+    
+    /**
      * Get frequency array for the spectrum bins
      * @param freq_array Output frequency array
      * @param freq_len Length of frequency array
@@ -123,11 +148,13 @@ private:
     std::vector<float> input_buffer_;
     std::vector<float> fft_output_;
     std::vector<float> magnitude_buffer_;
+    std::vector<float> psd_buffer_;
     
     float sample_rate_;
     int fft_size_;
     size_t write_pos_;
     bool spectrum_ready_;
+    bool psd_ready_;
     
     void processFrame();
 };
