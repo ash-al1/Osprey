@@ -181,7 +181,7 @@ int main(int argc, char* argv[]) {
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
     
-    // Initialize Dear ImGui
+    // Initialize Dear ImGui; set GUI flags
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
@@ -240,6 +240,7 @@ int main(int argc, char* argv[]) {
     ImPlot::DestroyContext();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
+	ImPlot::DestroyContext();
     ImGui::DestroyContext();
     
     glfwDestroyWindow(window);

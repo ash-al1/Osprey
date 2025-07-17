@@ -74,19 +74,17 @@ void FFTProcessor::complexToRealDB(float* real_buffer,
                                   int real_buffer_len,
                                   bool scale,
                                   float floor_db) {
-    // Ensure floor_db is negative
     float floor_db_neg = -std::fabs(floor_db);
+    const float epsilon = 1e-20f;
 
-    const float epsilon = 1e-20f; // Small value to avoid log(0)
-    
-    // Remove aggressive FFT length normalization for weak SDR signals
-    // const float fft_len_log10 = 20.0f * log10f(fft_len_float); // OLD
-    const float sdr_normalization = 20.0f; // Much gentler normalization for SDR
+	// Amplitude in dB
+	const float fft_len_float = static_cast<float>(fft_size_);
+    const float fft_len_log10 = 20.0f * log10f(fft_len_float);
 
     // DC component
     float magnitude_squared = complex_buffer[0] * complex_buffer[0];
     magnitude_squared = fmaxf(magnitude_squared, epsilon);
-    float dB = 10.0f * log10f(magnitude_squared) - sdr_normalization;
+    float dB = 10.0f * log10f(magnitude_squared) - fft_len_log10;
     dB = fmaxf(dB, floor_db_neg);
     real_buffer[0] = scale ? 1.0f - dB / floor_db_neg : dB;
 
@@ -94,7 +92,7 @@ void FFTProcessor::complexToRealDB(float* real_buffer,
     if (real_buffer_len >= fft_size_ / 2 + 1) {
         magnitude_squared = complex_buffer[1] * complex_buffer[1];
         magnitude_squared = fmaxf(magnitude_squared, epsilon);
-        dB = 10.0f * log10f(magnitude_squared) - sdr_normalization;
+        dB = 10.0f * log10f(magnitude_squared) - fft_len_log10;
         dB = fmaxf(dB, floor_db_neg);
         real_buffer[fft_size_ / 2] = scale ? 1.0f - dB / floor_db_neg : dB;
     }
@@ -105,7 +103,7 @@ void FFTProcessor::complexToRealDB(float* real_buffer,
         float imag = complex_buffer[2 * i + 1];
         magnitude_squared = real * real + imag * imag;
         magnitude_squared = fmaxf(magnitude_squared, epsilon);
-        dB = 10.0f * log10f(magnitude_squared) - sdr_normalization;
+        dB = 10.0f * log10f(magnitude_squared) - fft_len_log10;
         dB = fmaxf(dB, floor_db_neg);
         real_buffer[i] = scale ? 1.0f - dB / floor_db_neg : dB;
     }
@@ -260,14 +258,14 @@ void SpectrogramAnalyzer::processFrame() {
     fft_processor_->complexToRealDB(magnitude_buffer_.data(), 
                                    fft_output_.data(),
                                    magnitude_buffer_.size(),
-                                   false,  // no scale
+                                   true,	// scale
                                    80.0f);
 
 	fft_processor_->complexToPSD(psd_buffer_.data(),
                                 fft_output_.data(),
                                 psd_buffer_.size(),
                                 sample_rate_,
-                                false,   // scale
+                                false,		// scale
                                 80.0f);
     
     spectrum_ready_ = true;

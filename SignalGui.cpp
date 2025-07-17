@@ -379,14 +379,10 @@ void SignalGui::RenderFrequencyPlot() {
 void SignalGui::RenderSpectrogramPlot() {
     ImGui::Text("Waterfall");
     if (ImPlot::BeginPlot("##SpectrogramPlot", ImVec2(-1, -1), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText)) {
-        // Auto-scale colormap to actual data range
-        float min_val = -80.0f, max_val = -10.0f;
-        for (int t = 0; t < N_TIME_BINS; ++t) {
-            for (int f = 0; f < N_FREQ; ++f) {
-                if (spectrogram_data[t][f] < min_val) min_val = spectrogram_data[t][f];
-                if (spectrogram_data[t][f] > max_val) max_val = spectrogram_data[t][f];
-            }
-        }
+		// Heatmap min max values normalized
+		// Make sure Incoming data is scaled properly
+		float min_val = 0.0f;
+		float max_val = 1.0f;
         
         // Calculate frequency range and lock axes
         double center_freq = sdr_device_ ? sdr_device_->getFrequency() : 0.0;
