@@ -3,6 +3,7 @@ project(signals)
 set(CMAKE_CXX_STANDARD 17)
 
 # Find packages
+find_package(glm REQUIRED)
 find_package(glfw3 REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(Boost REQUIRED COMPONENTS program_options)
@@ -34,6 +35,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/imgui)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/implot)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/glad/include)
 include_directories(${UHD_INCLUDE_DIRS})
 
 # Add PFFFT include directories if found
@@ -87,7 +89,7 @@ if(HACKRF_FOUND)
     list(APPEND HAL_SOURCES HackRFDevice.cpp)
 endif()
 
-# Application source files (removed PFFFT_SOURCES)
+# Application source files
 set(APP_SOURCES
     main.cpp
     SignalGui.cpp
@@ -95,11 +97,23 @@ set(APP_SOURCES
     ${HAL_SOURCES}
 )
 
+# OPENGL
+set(OPENGL_UTILS_SOURCES
+    array2d.cpp
+    camera.cpp
+    frame_buffer.cpp
+    grid.cpp
+    shader.cpp
+	glad/src/glad.c
+	Spectro3D.cpp
+)
+
 # Create main executable
 add_executable(${PROJECT_NAME}
     ${IMGUI_SOURCES}
     ${IMPLOT_SOURCES}
     ${APP_SOURCES}
+	${OPENGL_UTILS_SOURCES}
 )
 
 # Link libraries
@@ -126,7 +140,7 @@ if(HACKRF_FOUND)
     list(APPEND LINK_LIBRARIES ${HACKRF_LIBRARIES})
 endif()
 
-target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARIES} glm::glm)
 
 # Test programs
 add_executable(test_circular_buffer TestCircularBuffer.cpp)

@@ -280,16 +280,16 @@ void SimulationDevice::generateMultitoneSamples(std::complex<float>* buffer,
         }
         
         // Add a sweeping tone that moves across the spectrum
-        double sweep_freq = 300e3 * std::sin(time * 0.05);  // ±300kHz sweep, slow
+		double sweep_freq = 300e3 * std::sin(time * 0.05);
         double sweep_phase = 2.0 * M_PI * sweep_freq * time;
-        real += 0.3f * std::cos(sweep_phase);
-        imag += 0.3f * std::sin(sweep_phase);
+        real += (0.3f / 200.0) * std::cos(sweep_phase);
+        imag += (0.3f / 200.0) * std::sin(sweep_phase);
         
         // Add some bandwidth around center frequency
-        double wide_signal_freq = 100e3 * (noise_dist_(rng_) * 0.1);  // ±10kHz random
+		double wide_signal_freq = 100e3 * (noise_dist_(rng_) * 0.1);
         double wide_phase = 2.0 * M_PI * wide_signal_freq * time;
-        real += 0.1f * std::cos(wide_phase);
-        imag += 0.1f * std::sin(wide_phase);
+        real += (0.1f / 200.0) * std::cos(wide_phase);
+        imag += (0.1f / 200.0) * std::sin(wide_phase);
         
         // Add noise
         real += noise_level_ * noise_dist_(rng_);

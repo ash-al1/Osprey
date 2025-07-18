@@ -1,6 +1,7 @@
 #include "SignalGui.h"
 #include "SDRFactory.h"
 #include "FFTProcessor.h"
+#include <glad/glad.h>
 #include <iostream>
 #include <cmath>
 #include <algorithm>
@@ -112,62 +113,152 @@ void SignalGui::ProcessSamples(const std::complex<float>* samples, size_t count)
 
 void SignalGui::Update() {
     update_counter_++;
-    
-    // Start receiving if not already (for devices that need continuous operation)
     if (sdr_device_ && sdr_device_->isInitialized() && !sdr_device_->isReceiving()) {
         StartReceiving();
     }
-    
-    // Update plot data periodically - faster updates for smooth waterfall
-    if (update_counter_ % 2 == 0) {   // Every 2 frames instead of 4
+
+	// Change update counter for faster updates per frame
+    if (update_counter_ % 2 == 0) {
         UpdatePlotData();
     }
-    
-    if (update_counter_ % 4 == 0) {   // Every 4 frames instead of 8  
+    if (update_counter_ % 4 == 0) {
         UpdateFrequencyDomain();
     }
-    
-    if (update_counter_ % 4 == 0) {   // Every 4 frames instead of 16 - much faster waterfall!
+    if (update_counter_ % 4 == 0) {
         UpdateWaterfall();
     }
-    
+
     // Set window position and size
     ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(WINDOW_WIDTH, WINDOW_HEIGHT), ImGuiCond_Always);
-    
+
     ImGui::Begin("SigProc", nullptr,
                  ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize);
-    
+
     // Render status bar
     RenderStatusBar();
-    
+
+    if (ImGui::BeginTabBar("MainTabs", ImGuiTabBarFlags_None)) {
+        if (ImGui::BeginTabItem("Multi-Plot View")) {
+            RenderMultiPlotView();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("3D Spectrogram")) {
+            Render3DSpectrogramView();
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+    ImGui::End();
+}
+
+
+void SignalGui::RenderMultiPlotView() {
     // Calculate dimensions for each plot
     float quarter_width  = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
     float quarter_height = (ImGui::GetContentRegionAvail().y - ImGui::GetStyle().ItemSpacing.y) * 0.5f;
-    
+
     // Top Left - Time Domain
     ImGui::BeginChild("TimeDomain", ImVec2(quarter_width, quarter_height), true);
     RenderTimeDomainPlot();
     ImGui::EndChild();
     ImGui::SameLine();
-    
+
     // Top Right - Frequency Domain
     ImGui::BeginChild("Frequency", ImVec2(quarter_width, quarter_height), true);
     RenderFrequencyPlot();
     ImGui::EndChild();
-    
+
     // Bottom Left - Spectrogram
     ImGui::BeginChild("Spectrogram", ImVec2(quarter_width, quarter_height), true);
     RenderSpectrogramPlot();
     ImGui::EndChild();
     ImGui::SameLine();
-    
-    // Bottom Right - PSD (keeping for now, but will show same as frequency)
+
+    // Bottom Right - PSD
     ImGui::BeginChild("PSD", ImVec2(quarter_width, quarter_height), true);
     RenderPowerSpectralDensity();
     ImGui::EndChild();
-    
-    ImGui::End();
+}
+
+void SignalGui::Render3DSpectrogramView() {
+    ImVec2 available_size = ImGui::GetContentRegionAvail();
+
+    // Reserve space for controls at bottom
+    float controls_height = 40.0f;  // Space for home button
+    float display_height = available_size.y - controls_height;
+    float display_width = available_size.x - 20.0f;  // Small padding
+
+    ImGui::BeginChild("3DSpectrogram", available_size, true);
+
+    // Lazy initialization with size validation
+    if (!waterfall_3d_) {
+        int render_width = std::max(512, static_cast<int>(display_width));
+        int render_height = std::max(512, static_cast<int>(display_height));
+        waterfall_3d_ = std::make_unique<Spectro3D>(render_width, render_height);
+        
+        if (!waterfall_3d_->isInitialized()) {
+            ImGui::Text("Failed to initialize 3D waterfall renderer");
+            ImGui::Text("Check that waterfall.vs and waterfall.fs exist in the working directory");
+            ImGui::Text("Also verify OpenGL context is properly initialized");
+            ImGui::EndChild();
+            return;
+        }
+    }
+
+    if (waterfall_3d_ && waterfall_3d_->isInitialized()) {
+        // Render the 3D waterfall
+        waterfall_3d_->render();
+
+        // Display with mouse interaction
+        unsigned int texture_id = waterfall_3d_->getTextureID();
+        if (texture_id != 0) {
+            ImVec2 image_pos = ImGui::GetCursorScreenPos();
+            ImGui::Image((void*)(intptr_t)texture_id,
+                        ImVec2(display_width, display_height));
+
+            // Handle mouse interaction on the image
+            if (ImGui::IsItemHovered()) {
+                ImGuiIO& io = ImGui::GetIO();
+                ImVec2 mouse_pos = ImGui::GetMousePos();
+                double rel_x = mouse_pos.x - image_pos.x;
+                double rel_y = mouse_pos.y - image_pos.y;
+
+                // Normalize coordinates to [0,1] range for more predictable behavior
+                double norm_x = rel_x / display_width;
+                double norm_y = rel_y / display_height;
+                
+                // Clamp to valid range
+                norm_x = std::max(0.0, std::min(1.0, norm_x));
+                norm_y = std::max(0.0, std::min(1.0, norm_y));
+
+                // Pass normalized coordinates scaled to internal size
+                waterfall_3d_->handleMouseDrag(norm_x * 800.0, norm_y * 600.0,
+                                              io.MouseDown[0], io.MouseDown[1]);
+
+                if (io.MouseWheel != 0.0f) {
+                    waterfall_3d_->handleMouseScroll(io.MouseWheel);
+                }
+            }
+        } else {
+            ImGui::Text("3D Renderer: No texture available");
+            ImGui::Text("This might indicate an OpenGL context issue");
+        }
+
+        // Controls
+        ImGui::Separator();
+        if (ImGui::Button("Home")) {
+            waterfall_3d_->resetView();
+        }
+        ImGui::SameLine();
+        ImGui::Text("Mouse: Left=Rotate, Right=Pan, Wheel=Zoom");
+
+    } else {
+        ImGui::Text("3D Waterfall renderer not initialized");
+        ImGui::Text("Check console for error messages");
+    }
+
+    ImGui::EndChild();
 }
 
 void SignalGui::RenderStatusBar() {
@@ -280,11 +371,12 @@ void SignalGui::UpdateFrequencyDomain() {
 }
 
 void SignalGui::UpdateWaterfall() {
+	// Update 2D waterfall
     // Use the current magnitude data for waterfall
     if (spectrum_ready_ && magnitude_buffer_.Size() >= N_FREQ) {
         std::vector<float> current_magnitudes(N_FREQ);
         magnitude_buffer_.CopyLatest(current_magnitudes.data(), N_FREQ);
-        
+
         // Copy to spectrogram row
         for (int f = 0; f < N_FREQ; ++f) {
             spectrogram_data[spectrogram_row_][f] = current_magnitudes[f];
@@ -297,6 +389,32 @@ void SignalGui::UpdateWaterfall() {
             spectrogram_data[spectrogram_row_][f] = intensity;
         }
         spectrogram_row_ = (spectrogram_row_ + 1) % N_TIME_BINS;
+    }
+    
+	// Update 3D waterfall with validation
+	if (waterfall_3d_ && waterfall_3d_->isInitialized() && 
+        spectrum_ready_ && magnitude_buffer_.Size() >= N_FREQ) {
+        
+        std::vector<float> current_magnitudes(N_FREQ);
+        magnitude_buffer_.CopyLatest(current_magnitudes.data(), N_FREQ);
+        
+        // Validate data before passing to 3D renderer
+        bool data_valid = true;
+        for (int i = 0; i < N_FREQ; ++i) {
+            if (!std::isfinite(current_magnitudes[i])) {
+                data_valid = false;
+                break;
+            }
+        }
+        
+        if (data_valid) {
+            waterfall_3d_->updateWaterfallData(current_magnitudes.data(), N_FREQ);
+        } else {
+            static int error_count = 0;
+            if (error_count++ < 5) {  // Limit error spam
+                std::cerr << "Warning: Invalid magnitude data detected" << std::endl;
+            }
+        }
     }
 }
 

@@ -78,8 +78,10 @@ void FFTProcessor::complexToRealDB(float* real_buffer,
     const float epsilon = 1e-20f;
 
 	// Amplitude in dB
+	// dynamic when sim, simple when usrp because i cant fucking fix it
 	const float fft_len_float = static_cast<float>(fft_size_);
-    const float fft_len_log10 = 20.0f * log10f(fft_len_float);
+	//const float fft_len_log10 = 20.0f * log10f(fft_len_float);
+	const float fft_len_log10 = 20.0f;
 
     // DC component
     float magnitude_squared = complex_buffer[0] * complex_buffer[0];
