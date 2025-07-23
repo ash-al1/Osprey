@@ -2,6 +2,8 @@
 #include "imgui/backends/imgui_impl_glfw.h"
 #include "imgui/backends/imgui_impl_opengl3.h"
 #include "implot/implot.h"
+#include <glad/glad.h>
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include <boost/program_options.hpp>
 #include <iostream>
@@ -180,8 +182,15 @@ int main(int argc, char* argv[]) {
 	// VSync
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
+
+	// Try to load GLAD & OpenGL not through GLFW
+	// This is really scuffed but Spectrolysis uses GLAD so we will too
+	if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
+		glfwTerminate();
+		return 1;
+	}
     
-    // Initialize Dear ImGui
+    // Initialize Dear ImGui; set GUI flags
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
@@ -240,6 +249,7 @@ int main(int argc, char* argv[]) {
     ImPlot::DestroyContext();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
+	ImPlot::DestroyContext();
     ImGui::DestroyContext();
     
     glfwDestroyWindow(window);

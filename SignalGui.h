@@ -5,6 +5,7 @@
 #include "CircularBuffer.h"
 #include "SDRDevice.h"
 #include "FFTProcessor.h"
+#include "Spectro3D.h"
 #include <memory>
 #include <atomic>
 #include <string>
@@ -48,6 +49,8 @@ private:
     std::unique_ptr<SpectrogramAnalyzer> spectrogram_analyzer_;
     bool spectrum_ready_ = false;
 
+    std::unique_ptr<Spectro3D> waterfall_3d_;
+
 public:
     SignalGui();
     ~SignalGui();
@@ -88,4 +91,9 @@ private:
     void RenderSpectrogramPlot();
     void RenderPowerSpectralDensity();
     void RenderStatusBar();
+
+	// Tab windows
+	void RenderMultiPlotView();
+    void Render3DSpectrogramView();
+
 };
