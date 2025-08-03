@@ -13,7 +13,7 @@ class FrameBuffer;
  */
 class Spectro3D {
 public:
-	Spectro3D(int width=800, int height=600);
+	Spectro3D(int width=800, int height=600, int time_bins=100, int freq_bins=1025);
 	~Spectro3D();
 
 	void render();

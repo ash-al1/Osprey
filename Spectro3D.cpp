@@ -6,12 +6,12 @@
 #include <cstring>
 #include <cmath>
 
-Spectro3D::Spectro3D(int width, int height)
+Spectro3D::Spectro3D(int width, int height, int time_bins, int freq_bins)
     : width_(width)
     , height_(height)
     , initialized_(false)
-	, grid_rows_(300)
-	, grid_cols_(1024)
+	, grid_rows_(time_bins)
+	, grid_cols_(freq_bins)
 	, mouse_dragging_(false)
     , right_mouse_dragging_(false)
     , last_mouse_x_(0.0)

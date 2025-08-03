@@ -9,15 +9,18 @@
 #include <memory>
 #include <atomic>
 #include <string>
+#include <vector>
 
 class SignalGui {
 private:
     static constexpr int WINDOW_WIDTH  = 1200;
     static constexpr int WINDOW_HEIGHT = 800;
 
+	int fft_size_;
+	int num_freq_bins_;
+
     static constexpr int N_SAMPLES = 1000;
-    static constexpr int N_FREQ = 1024;
-    static constexpr int N_TIME_BINS = 300;
+    static constexpr int N_TIME_BINS = 100;
 
     // Plot buffers
     CircularBuffer<float> time_buffer_;
@@ -31,10 +34,10 @@ private:
     // Plot displays
     float time_data[N_SAMPLES];
     float signal_data[N_SAMPLES];
-    float freq_data[N_FREQ];
-    float magnitude_data[N_FREQ];
-    float psd_data[N_FREQ];
-    float spectrogram_data[N_TIME_BINS][N_FREQ];
+	std::vector<float> freq_data;
+	std::vector<float> magnitude_data;
+	std::vector<float> psd_data;
+	std::vector<std::vector<float>> spectrogram_data;	
 
     float current_time_;
     float sample_rate_;
