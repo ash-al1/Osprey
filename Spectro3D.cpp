@@ -109,54 +109,30 @@ unsigned int Spectro3D::getTextureID() const {
 
 bool Spectro3D::create3DGrid() {
     try {
-        // Validate dimensions
-        if (grid_rows_ <= 0 || grid_cols_ <= 0) {
-            std::cerr << "Invalid grid dimensions: " << grid_rows_ << "x" << grid_cols_ << std::endl;
-            return false;
-        }
-
         // Initialize grid Z-data with zeros
         grid_z_data_.resize(grid_rows_ * grid_cols_, 0.0f);
-        std::cout << "Created 3D grid data: " << grid_rows_ << "x" << grid_cols_ 
-                  << " (" << grid_z_data_.size() << " elements)" << std::endl;
 
-        // Create shader - check if files exist
-        try {
-            shader_ = std::make_unique<Shader>("waterfall.vs", "waterfall.fs");
-            std::cout << "Loaded waterfall shaders successfully" << std::endl;
-        } catch (const std::exception& e) {
-            std::cerr << "Failed to load shaders: " << e.what() << std::endl;
-            return false;
-        }
-
-        // Create 3D camera
+        shader_ = std::make_unique<Shader>("waterfall.vs", "waterfall.fs");
         camera_ = std::make_unique<Camera>();
-        if (!camera_) {
-            std::cerr << "Failed to create camera" << std::endl;
-            return false;
-        }
 
-        // Create Grid object with validation
-        try {
-            grid_ = std::make_unique<Grid>(
-                grid_z_data_.data(),
-                grid_rows_,
-                grid_cols_,
-                0,           // base attribute index
-                false,       // no UV coordinates
-                -1.0f, 1.0f, // X range: left to right
-                1.0f, -1.0f, // Y range: top to bottom (inverted for waterfall)
-                GL_STATIC_DRAW,  // XY coordinates don't change
-                GL_DYNAMIC_DRAW  // Z coordinates update frequently
-            );
-            std::cout << "Created OpenGL grid successfully" << std::endl;
-        } catch (const std::exception& e) {
-            std::cerr << "Failed to create grid: " << e.what() << std::endl;
-            return false;
-        }
+        // Calculate proper aspect ratio to prevent stretching
+        float aspect_ratio = static_cast<float>(grid_rows_) / static_cast<float>(grid_cols_);
+
+        // Adjust coordinates to maintain proper aspect ratio
+        float x_range = 1.0f;                    // Full width
+        float y_range = x_range * aspect_ratio;  // Scaled height
+
+        grid_ = std::make_unique<Grid>(
+            grid_z_data_.data(),
+            grid_rows_,
+            grid_cols_,
+            0,
+            false,
+            x_range, -x_range,    // xR, xL: -1 to +1 (frequency)
+            y_range, -y_range     // yT, yB: scaled by aspect ratio (time)
+        );
 
         return true;
-
     } catch (const std::exception& e) {
         std::cerr << "Error creating 3D grid: " << e.what() << std::endl;
         return false;
