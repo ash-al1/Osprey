@@ -22,6 +22,17 @@ public:
         , capacity_(capacity) {
     }
 
+	// Bulk push
+	void PushBulk(const T* items, size_t count) {
+		std::lock_guard<std::mutex> lock(mutex_);
+		for (size_t i = 0; i < count; i++) {
+			data_[head_] = items[i];
+			head_ = (head_ + 1) % capacity_;
+			if (size_ < capacity_) { ++size_; }
+			else { tail_ = (tail_ + 1) % capacity_; }
+		}
+	}
+
 	// Push an element to the buffer
 	void Push(const T& item) {
 		std::lock_guard<std::mutex> lock(mutex_);

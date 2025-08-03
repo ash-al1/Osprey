@@ -6,6 +6,7 @@
 #include <cmath>
 #include <algorithm>
 #include <iomanip>
+#include <chrono>
 
 SignalGui::SignalGui()
     : time_buffer_(N_SAMPLES)
@@ -17,21 +18,32 @@ SignalGui::SignalGui()
     , psd_buffer_(num_freq_bins_)
     , current_time_(0.0f)
     , sample_rate_(1000.0f)
+	, last_sample_rate_(-1.0)
+	, last_center_freq_(-1.0)
+	, freq_array_valid_(false)
+	, new_time_data_available_(false)
+	, new_freq_data_available_(false)
     , spectrogram_row_(0)
     , update_counter_(0)
     , samples_received_(0)
     , overflow_count_(0) {
 
-	// Dynamically allocate vectors based on num_freq_bins_
 	freq_data.resize(num_freq_bins_);
 	magnitude_data.resize(num_freq_bins_);
 	psd_data.resize(num_freq_bins_);
+
+	real_samples_buffer.reserve(8192*2);
     
-    // Initialize spectrogram data with noise
-	spectrogram_data.resize(N_TIME_BINS);
-	for ( int t = 0; t < N_TIME_BINS; ++t ) {
-		spectrogram_data[t].resize(num_freq_bins_, -80.0f);
-	}
+	spectrogram_data.resize(N_TIME_BINS * num_freq_bins_, -80.0f);
+	rel_time_array.resize(N_SAMPLES);
+	updateRelTimeArray();
+
+	time_data_offsets.resize(N_SAMPLES);
+	updateTimeDataOffsets();
+
+	auto now = std::chrono::steady_clock::now();
+	last_freq_update_time_ = now;
+	last_waterfall_update_time_ = now;
 }
 
 SignalGui::~SignalGui() {
@@ -91,22 +103,24 @@ bool SignalGui::IsReceiving() const {
 }
 
 void SignalGui::ProcessSamples(const std::complex<float>* samples, size_t count) {
-    // Extract real part for time domain display
+	if (real_samples_buffer.size() < count) {
+		real_samples_buffer.resize(count);
+	}
+
     for (size_t i = 0; i < count; ++i) {
-        float real_sample = samples[i].real();
-        signal_buffer_.Push(real_sample);
-        current_time_ += 1.0f / sample_rate_;
+		real_samples_buffer[i] = samples[i].real();
     }
+
+	signal_buffer_.PushBulk(real_samples_buffer.data(), count);
+	new_time_data_available_.store(true);
+	current_time_ += count / sample_rate_;
     
-    // Feed samples to spectrogram analyzer
     if (spectrogram_analyzer_) {
         spectrogram_analyzer_->processSamples(samples, count);
-        // Note: spectrum_ready_ will be updated in UpdateFrequencyDomain()
     }
     
     samples_received_.fetch_add(count);
     
-    // Check device statistics for overflows
     if (sdr_device_) {
         size_t device_overflows = sdr_device_->getOverflowCount();
         if (device_overflows > overflow_count_.load()) {
@@ -121,16 +135,35 @@ void SignalGui::Update() {
         StartReceiving();
     }
 
-	// Change update counter for faster updates per frame
-    if (update_counter_ % 2 == 0) {
-        UpdatePlotData();
-    }
-    if (update_counter_ % 4 == 0) {
-        UpdateFrequencyDomain();
-    }
-    if (update_counter_ % 4 == 0) {
+	auto current_time = std::chrono::steady_clock::now();
+
+	auto freq_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+			current_time - last_freq_update_time_).count();
+
+	bool should_update_freq = freq_elapsed >= FREQ_UPDATE_INTERVAL_MS;
+	bool freq_data_updated = false;
+
+	if (should_update_freq) {
+		UpdateFrequencyDomain();
+		last_freq_update_time_ = current_time;
+		freq_data_updated = spectrum_ready_;
+	}
+
+	auto waterfall_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        current_time - last_waterfall_update_time_).count();
+
+    bool should_update_waterfall = waterfall_elapsed >= WATERFALL_UPDATE_INTERVAL_MS;
+
+    if (should_update_waterfall && freq_data_updated) {
         UpdateWaterfall();
+        last_waterfall_update_time_ = current_time;
     }
+
+	if (new_time_data_available_.load() || new_freq_data_available_.load()) {
+		UpdatePlotData();
+		new_time_data_available_.store(false);
+		new_freq_data_available_.store(false);
+	}
 
     // Set window position and size
     ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
@@ -306,10 +339,22 @@ void SignalGui::RenderStatusBar() {
     }
 }
 
+void SignalGui::updateRelTimeArray() {
+	for (int i = 0; i < N_SAMPLES; ++i) {
+		rel_time_array[i] = float(i) / sample_rate_;
+	}
+}
+
+void SignalGui::updateTimeDataOffsets() {
+	float dt = 1.0f / sample_rate_;
+	for (int i = 0; i < N_SAMPLES; ++i) {
+		time_data_offsets[i] = -(N_SAMPLES - 1 - i) * dt;
+	}
+}
+
 void SignalGui::UpdatePlotData() {
-    float dt = 1.0f / sample_rate_;
     for (int i = 0; i < N_SAMPLES; ++i) {
-        time_data[i] = current_time_ - (N_SAMPLES - 1 - i) * dt;
+        time_data[i] = current_time_ + time_data_offsets[i];
     }
     signal_buffer_.CopyLatest(signal_data, N_SAMPLES);
     freq_buffer_.CopyLatest(freq_data.data(), num_freq_bins_);
@@ -323,12 +368,13 @@ void SignalGui::UpdateFrequencyDomain() {
 
         for (int i = 0; i < num_freq_bins_; ++i) {
             float freq = (float)i * nyquist_freq / num_freq_bins_;
-            freq_buffer_.Push(freq);
-
-            float mag = -80.0f + 10.0f * (float(rand()) / RAND_MAX - 0.5f);
-            magnitude_buffer_.Push(mag);
-            psd_buffer_.Push(mag - 10.0f);
+			freq_data[i] = freq;
+            magnitude_data[i]  = -80.0f + 10.0f * (float(rand()) / RAND_MAX - 0.5f);
+            psd_data[i] = magnitude_data[i] - 10.0f;
         }
+		freq_buffer_.PushBulk(freq_data.data(), num_freq_bins_);
+		magnitude_buffer_.PushBulk(magnitude_data.data(), num_freq_bins_);
+		psd_buffer_.PushBulk(psd_data.data(), num_freq_bins_);
         return;
     }
 
@@ -337,16 +383,32 @@ void SignalGui::UpdateFrequencyDomain() {
 
     if (spectrum_ready_) {
         double center_freq = sdr_device_ ? sdr_device_->getFrequency() : 0.0;
-        spectrogram_analyzer_->getFrequencyArray(freq_data.data(), num_freq_bins_, center_freq);
 
-        for (int i = 0; i < num_freq_bins_; ++i) {
-            freq_buffer_.Push(freq_data[i]);
-            magnitude_buffer_.Push(magnitude_data[i]);
-            if (psd_ready)
-                psd_buffer_.Push(psd_data[i]);
-            else
-                psd_buffer_.Push(magnitude_data[i] - 10.0f);
-        }
+		if (!freq_array_valid_ || sample_rate_ != last_sample_rate_ ||
+			center_freq != last_center_freq_) {
+
+			spectrogram_analyzer_->getFrequencyArray(freq_data.data(), num_freq_bins_, center_freq);
+
+			if (sample_rate_ != last_sample_rate_) {
+				updateRelTimeArray();
+				updateTimeDataOffsets();
+			}
+
+			last_sample_rate_ = sample_rate_;
+			last_center_freq_ = center_freq;
+			freq_array_valid_ = true;
+		}
+
+		if (!psd_ready) {
+			for (int i = 0;i < num_freq_bins_; ++i) {
+				psd_data[i] = magnitude_data[i] - 10.0f;
+			}
+		}
+
+		freq_buffer_.PushBulk(freq_data.data(), num_freq_bins_);
+		magnitude_buffer_.PushBulk(magnitude_data.data(), num_freq_bins_);
+		psd_buffer_.PushBulk(psd_data.data(), num_freq_bins_);
+		new_freq_data_available_.store(true);
     }
 }
 
@@ -355,36 +417,31 @@ void SignalGui::UpdateWaterfall() {
         magnitude_buffer_.CopyLatest(magnitude_data.data(), num_freq_bins_);
 
         for (int f = 0; f < num_freq_bins_; ++f) {
-            spectrogram_data[spectrogram_row_][f] = magnitude_data[f];
+            spectrogram_data[spectrogram_row_ * num_freq_bins_ + f] = magnitude_data[f];
         }
         spectrogram_row_ = (spectrogram_row_ + 1) % N_TIME_BINS;
+
+        if (waterfall_3d_ && waterfall_3d_->isInitialized()) {
+            if (magnitude_data.size() == num_freq_bins_) {
+                waterfall_3d_->updateWaterfallData(magnitude_data.data(), num_freq_bins_);
+            } else {
+                std::cerr << "Warning: magnitude_size mismatch. Expected "
+                          << num_freq_bins_ << " actual " << magnitude_data.size()
+                          << std::endl;
+            }
+        }
     } else {
         for (int f = 0; f < num_freq_bins_; ++f) {
             float intensity = -70.0f + 5.0f * (float(rand()) / RAND_MAX - 0.5f);
-            spectrogram_data[spectrogram_row_][f] = intensity;
+            spectrogram_data[spectrogram_row_ * num_freq_bins_ + f] = intensity;
         }
         spectrogram_row_ = (spectrogram_row_ + 1) % N_TIME_BINS;
-    }
-    
-	// Update 3D waterfall with validation
-	if (waterfall_3d_ && waterfall_3d_->isInitialized() && 
-        spectrum_ready_ && magnitude_buffer_.Size() >= num_freq_bins_) {
-
-		if ( magnitude_data.size() == num_freq_bins_ ) {
-			magnitude_buffer_.CopyLatest(magnitude_data.data(), num_freq_bins_);
-			waterfall_3d_->updateWaterfallData(magnitude_data.data(), num_freq_bins_);
-		} else {
-			std::cerr << "Warning: magnitude_size mismatch. Expected "
-					  << num_freq_bins_ << " actual " << magnitude_data.size()
-					  << std::endl;
-		}
     }
 }
 
 void SignalGui::RenderTimeDomainPlot() {
     ImGui::Text("Time domain");
     if (ImPlot::BeginPlot("##TimePlot", ImVec2(-1, -1), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText)) {
-        // Auto-scale Y axis to signal data with fallback
         float min_amp = -1.0f, max_amp = 1.0f;
         if (signal_buffer_.Size() >= N_SAMPLES) {
             min_amp = signal_data[0];
@@ -393,33 +450,25 @@ void SignalGui::RenderTimeDomainPlot() {
                 if (signal_data[i] < min_amp) min_amp = signal_data[i];
                 if (signal_data[i] > max_amp) max_amp = signal_data[i];
             }
-            // Add some padding
             float range = max_amp - min_amp;
-            if (range > 0.001f) {  // Only scale if we have reasonable range
+            if (range > 0.001f) {
                 float padding = range * 0.1f;
                 min_amp -= padding;
                 max_amp += padding;
             } else {
-                // Fallback if range is too small
                 min_amp = -0.1f;
                 max_amp = 0.1f;
             }
         }
         
-        // Calculate correct time range for the samples
-        float time_duration = float(N_SAMPLES) / sample_rate_;  // Actual duration of samples
+        float time_duration = float(N_SAMPLES) / sample_rate_;
         
         ImPlot::SetupAxes("Time [s]", "Amplitude", 
                          ImPlotAxisFlags_NoMenus | ImPlotAxisFlags_Lock,
                          ImPlotAxisFlags_NoMenus | ImPlotAxisFlags_Lock);
         ImPlot::SetupAxesLimits(0.0, time_duration, min_amp, max_amp, ImGuiCond_Always);
         
-        float rel_time[N_SAMPLES];
-        for (int i = 0; i < N_SAMPLES; ++i) {
-            rel_time[i] = float(i) / sample_rate_;
-        }
-        
-        ImPlot::PlotLine("Signal", rel_time, signal_data, N_SAMPLES);
+        ImPlot::PlotLine("Signal", rel_time_array.data(), signal_data, N_SAMPLES);
         ImPlot::EndPlot();
     }
 }
@@ -473,16 +522,9 @@ void SignalGui::RenderSpectrogramPlot() {
                          ImPlotAxisFlags_NoMenus | ImPlotAxisFlags_Lock, 
                          ImPlotAxisFlags_NoMenus | ImPlotAxisFlags_Lock | ImPlotAxisFlags_Invert);
         ImPlot::SetupAxesLimits(freq_min, freq_max, 0, N_TIME_BINS, ImGuiCond_Always);
-
-		std::vector<float> flattened_data(N_TIME_BINS * num_freq_bins_);
-		for ( int t = 0; t < N_TIME_BINS; ++t ) {
-			for ( int f = 0; f < num_freq_bins_; ++f ) {
-				flattened_data[t * num_freq_bins_ + f] = spectrogram_data[t][f];
-			}
-		}
         
         ImPlot::PlotHeatmap("##Waterfall",
-                           (float*)flattened_data.data(),
+                           (float*)spectrogram_data.data(),
                            N_TIME_BINS, num_freq_bins_,
                            min_val, max_val,
                            nullptr,
@@ -543,9 +585,10 @@ bool SignalGui::SetSampleRate(double rate_sps) {
         device_config_.sample_rate = rate_sps;
         sample_rate_ = static_cast<float>(rate_sps);
         
-        // Recreate spectrogram analyzer with new sample rate
-        int fft_size = 2048;
-        spectrogram_analyzer_ = std::make_unique<SpectrogramAnalyzer>(fft_size, sample_rate_);
+		// Change in sample rate should regen frequency array
+		freq_array_valid_ = false;
+
+        spectrogram_analyzer_ = std::make_unique<SpectrogramAnalyzer>(fft_size_, sample_rate_);
     }
     return success;
 }

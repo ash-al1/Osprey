@@ -10,6 +10,7 @@
 #include <atomic>
 #include <string>
 #include <vector>
+#include <chrono>
 
 class SignalGui {
 private:
@@ -21,6 +22,9 @@ private:
 
     static constexpr int N_SAMPLES = 1000;
     static constexpr int N_TIME_BINS = 100;
+
+    static constexpr int FREQ_UPDATE_INTERVAL_MS = 25;
+    static constexpr int WATERFALL_UPDATE_INTERVAL_MS = 40;
 
     // Plot buffers
     CircularBuffer<float> time_buffer_;
@@ -37,11 +41,25 @@ private:
 	std::vector<float> freq_data;
 	std::vector<float> magnitude_data;
 	std::vector<float> psd_data;
-	std::vector<std::vector<float>> spectrogram_data;	
+	std::vector<float> spectrogram_data;
+
+	std::atomic<bool> new_time_data_available_;
+	std::atomic<bool> new_freq_data_available_;
+
+	std::chrono::steady_clock::time_point last_freq_update_time_;
+	std::chrono::steady_clock::time_point last_waterfall_update_time_;
+
+	std::vector<float> real_samples_buffer;
+	std::vector<float> rel_time_array;
+	std::vector<float> time_data_offsets;
 
     float current_time_;
     float sample_rate_;
     int update_counter_;
+
+	double last_sample_rate_;
+	double last_center_freq_;
+	bool freq_array_valid_;
 
     std::unique_ptr<SDRDevice> sdr_device_;
     SDRConfig device_config_;
@@ -87,6 +105,8 @@ private:
     void UpdatePlotData();
     void UpdateFrequencyDomain();
     void UpdateWaterfall();
+	void updateRelTimeArray();
+	void updateTimeDataOffsets();
     
     // Rendering functions
     void RenderTimeDomainPlot();
