@@ -11,7 +11,7 @@
 SignalGui::SignalGui()
     : time_buffer_(N_SAMPLES)
     , signal_buffer_(N_SAMPLES)
-	, fft_size_(4096)
+	, fft_size_(1024)
 	, num_freq_bins_(fft_size_ / 2 + 1)
     , freq_buffer_(num_freq_bins_)
     , magnitude_buffer_(num_freq_bins_)
@@ -67,6 +67,9 @@ bool SignalGui::Initialize(const SDRConfig& config) {
     sample_rate_ = static_cast<float>(sdr_device_->getSampleRate());
     
     spectrogram_analyzer_ = std::make_unique<SpectrogramAnalyzer>(fft_size_, sample_rate_);
+
+	// Custom colormap for 2D spectrogram
+	spectrumColormap();
     
     std::cout << "SignalGui initialized with " << sdr_device_->getDeviceType() 
               << " device, FFT size: " << fft_size_ << std::endl;
@@ -176,8 +179,20 @@ void SignalGui::Update() {
     RenderStatusBar();
 
     if (ImGui::BeginTabBar("MainTabs", ImGuiTabBarFlags_None)) {
-        if (ImGui::BeginTabItem("Multi-Plot View")) {
-            RenderMultiPlotView();
+        if (ImGui::BeginTabItem("Time")) {
+			RenderTimeDomainPlot();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Frequency")) {
+			RenderFrequencyPlot();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("PSD")) {
+			RenderPowerSpectralDensity();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("2D Spectrogram")) {
+			RenderSpectrogramPlot();
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("3D Spectrogram")) {
@@ -187,35 +202,6 @@ void SignalGui::Update() {
         ImGui::EndTabBar();
     }
     ImGui::End();
-}
-
-
-void SignalGui::RenderMultiPlotView() {
-    // Calculate dimensions for each plot
-    float quarter_width  = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
-    float quarter_height = (ImGui::GetContentRegionAvail().y - ImGui::GetStyle().ItemSpacing.y) * 0.5f;
-
-    // Top Left - Time Domain
-    ImGui::BeginChild("TimeDomain", ImVec2(quarter_width, quarter_height), true);
-    RenderTimeDomainPlot();
-    ImGui::EndChild();
-    ImGui::SameLine();
-
-    // Top Right - Frequency Domain
-    ImGui::BeginChild("Frequency", ImVec2(quarter_width, quarter_height), true);
-    RenderFrequencyPlot();
-    ImGui::EndChild();
-
-    // Bottom Left - Spectrogram
-    ImGui::BeginChild("Spectrogram", ImVec2(quarter_width, quarter_height), true);
-    RenderSpectrogramPlot();
-    ImGui::EndChild();
-    ImGui::SameLine();
-
-    // Bottom Right - PSD
-    ImGui::BeginChild("PSD", ImVec2(quarter_width, quarter_height), true);
-    RenderPowerSpectralDensity();
-    ImGui::EndChild();
 }
 
 void SignalGui::Render3DSpectrogramView() {
@@ -441,6 +427,9 @@ void SignalGui::UpdateWaterfall() {
 
 void SignalGui::RenderTimeDomainPlot() {
     ImGui::Text("Time domain");
+	ImPlot::PushStyleColor(ImPlotCol_PlotBg, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
+    ImPlot::PushStyleColor(ImPlotCol_FrameBg, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
+    ImPlot::PushStyleColor(ImPlotCol_Line, ImVec4(0.0f, 1.0f, 1.0f, 1.0f));
     if (ImPlot::BeginPlot("##TimePlot", ImVec2(-1, -1), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText)) {
         float min_amp = -1.0f, max_amp = 1.0f;
         if (signal_buffer_.Size() >= N_SAMPLES) {
@@ -471,10 +460,14 @@ void SignalGui::RenderTimeDomainPlot() {
         ImPlot::PlotLine("Signal", rel_time_array.data(), signal_data, N_SAMPLES);
         ImPlot::EndPlot();
     }
+	ImPlot::PopStyleColor(3);
 }
 
 void SignalGui::RenderFrequencyPlot() {
     ImGui::Text("Frequency domain");
+	ImPlot::PushStyleColor(ImPlotCol_PlotBg, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
+    ImPlot::PushStyleColor(ImPlotCol_FrameBg, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
+    ImPlot::PushStyleColor(ImPlotCol_Line, ImVec4(0.0f, 1.0f, 0.8f, 1.0f));
     if (ImPlot::BeginPlot("##FreqPlot", ImVec2(-1, -1), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText)) {
         float min_mag = -80.0f, max_mag = -10.0f;
         if (magnitude_buffer_.Size() > 0) {
@@ -501,41 +494,50 @@ void SignalGui::RenderFrequencyPlot() {
         ImPlot::PlotLine("Magnitude", freq_data.data(), magnitude_data.data(), num_freq_bins_);
         ImPlot::EndPlot();
     }
+	ImPlot::PopStyleColor(3);
 }
 
 void SignalGui::RenderSpectrogramPlot() {
     ImGui::Text("Waterfall");
+    ImPlot::PushStyleColor(ImPlotCol_PlotBg, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
+    ImPlot::PushStyleColor(ImPlotCol_FrameBg, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
+
     if (ImPlot::BeginPlot("##SpectrogramPlot", ImVec2(-1, -1), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText)) {
-		/*
-		 * Spectrogram data has to be scaled otherwise it'll be fucked. Make
-		 * sure processed input is scaled.
-		 */
-		float min_val = 0.0f;
-		float max_val = 1.0f;
-        
+
+        float reference_level = 0.8f;
+        float dynamic_range = 0.6f;
+        float noise_floor = reference_level - dynamic_range;
+
         // Calculate frequency range and lock axes
         double center_freq = sdr_device_ ? sdr_device_->getFrequency() : 0.0;
         float freq_min = center_freq;
         float freq_max = center_freq + sample_rate_ / 2.0f;
-        
-        ImPlot::SetupAxes("Frequency [Hz]", "Time", 
-                         ImPlotAxisFlags_NoMenus | ImPlotAxisFlags_Lock, 
+
+        ImPlot::SetupAxes("Frequency [Hz]", "Time",
+                         ImPlotAxisFlags_NoMenus | ImPlotAxisFlags_Lock,
                          ImPlotAxisFlags_NoMenus | ImPlotAxisFlags_Lock | ImPlotAxisFlags_Invert);
         ImPlot::SetupAxesLimits(freq_min, freq_max, 0, N_TIME_BINS, ImGuiCond_Always);
-        
+
+		ImPlot::PushColormap(custom_spectrum_colormap_);
+
         ImPlot::PlotHeatmap("##Waterfall",
                            (float*)spectrogram_data.data(),
                            N_TIME_BINS, num_freq_bins_,
-                           min_val, max_val,
+                           noise_floor, reference_level,
                            nullptr,
                            ImPlotPoint(freq_min, 0),
                            ImPlotPoint(freq_max, N_TIME_BINS));
+        ImPlot::PopColormap();
         ImPlot::EndPlot();
     }
+    ImPlot::PopStyleColor(2);
 }
 
 void SignalGui::RenderPowerSpectralDensity() {
     ImGui::Text("Power spectral density");
+	ImPlot::PushStyleColor(ImPlotCol_PlotBg, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
+    ImPlot::PushStyleColor(ImPlotCol_FrameBg, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
+    ImPlot::PushStyleColor(ImPlotCol_Line, ImVec4(0.2f, 0.8f, 1.0f, 1.0f));
     if (ImPlot::BeginPlot("##PSDPlot", ImVec2(-1, -1), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText)) {
         float min_psd = -100.0f, max_psd = -20.0f;
         if (psd_buffer_.Size() > 0) {
@@ -564,6 +566,7 @@ void SignalGui::RenderPowerSpectralDensity() {
         ImPlot::PlotLine("PSD", freq_data.data(), psd_data.data(), num_freq_bins_);
         ImPlot::EndPlot();
     }
+	ImPlot::PopStyleColor(3);
 }
 
 // Device control methods
@@ -611,6 +614,27 @@ bool SignalGui::SetBandwidth(double bandwidth_hz) {
         device_config_.bandwidth = bandwidth_hz;
     }
     return success;
+}
+
+void SignalGui::spectrumColormap() {
+    static const ImVec4 spectrum_colors[] = {
+        ImVec4(0.0f, 0.0f, 0.2f, 1.0f),    // Dark blue (noise floor)
+        ImVec4(0.0f, 0.0f, 0.6f, 1.0f),    // Blue
+        ImVec4(0.0f, 0.3f, 1.0f, 1.0f),    // Light blue
+        ImVec4(0.0f, 0.8f, 1.0f, 1.0f),    // Cyan
+        ImVec4(0.0f, 1.0f, 0.8f, 1.0f),    // Cyan-green
+        ImVec4(0.0f, 1.0f, 0.4f, 1.0f),    // Green
+        ImVec4(0.5f, 1.0f, 0.0f, 1.0f),    // Yellow-green
+        ImVec4(1.0f, 1.0f, 0.0f, 1.0f),    // Yellow (medium signals)
+        ImVec4(1.0f, 0.7f, 0.0f, 1.0f),    // Orange
+        ImVec4(1.0f, 0.4f, 0.0f, 1.0f),    // Red-orange
+        ImVec4(1.0f, 0.0f, 0.0f, 1.0f),    // Red (strong signals)
+        ImVec4(1.0f, 0.5f, 0.5f, 1.0f),    // Light red
+        ImVec4(1.0f, 1.0f, 1.0f, 1.0f)     // White (very strong)
+    };
+
+    custom_spectrum_colormap_ = ImPlot::AddColormap("SpectrumAnalyzer",
+			spectrum_colors, sizeof(spectrum_colors) / sizeof(ImVec4));
 }
 
 // Info methods

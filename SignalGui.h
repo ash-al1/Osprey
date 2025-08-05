@@ -14,14 +14,14 @@
 
 class SignalGui {
 private:
-    static constexpr int WINDOW_WIDTH  = 1200;
-    static constexpr int WINDOW_HEIGHT = 800;
+    static constexpr int WINDOW_WIDTH  = 1920;
+    static constexpr int WINDOW_HEIGHT = 1080;
 
 	int fft_size_;
 	int num_freq_bins_;
 
     static constexpr int N_SAMPLES = 1000;
-    static constexpr int N_TIME_BINS = 100;
+    static constexpr int N_TIME_BINS = 300;
 
     static constexpr int FREQ_UPDATE_INTERVAL_MS = 25;
     static constexpr int WATERFALL_UPDATE_INTERVAL_MS = 40;
@@ -72,6 +72,9 @@ private:
 
     std::unique_ptr<Spectro3D> waterfall_3d_;
 
+	int custom_spectrum_colormap_ = -1;
+	void spectrumColormap();
+
 public:
     SignalGui();
     ~SignalGui();
@@ -113,10 +116,6 @@ private:
     void RenderFrequencyPlot();
     void RenderSpectrogramPlot();
     void RenderPowerSpectralDensity();
-    void RenderStatusBar();
-
-	// Tab windows
-	void RenderMultiPlotView();
     void Render3DSpectrogramView();
-
+    void RenderStatusBar();
 };

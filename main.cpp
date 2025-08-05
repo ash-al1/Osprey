@@ -17,8 +17,10 @@
 #include "USRPDevice.h"
 #include "SimulationDevice.h"
 
-#define WINDOW_WIDTH  1200
-#define WINDOW_HEIGHT 800
+#include "theme.h"
+
+#define WINDOW_WIDTH  1920
+#define WINDOW_HEIGHT 1080
 
 namespace po = boost::program_options;
 
@@ -196,7 +198,8 @@ int main(int argc, char* argv[]) {
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    ImGui::StyleColorsClassic();
+
+	SetDraculaTheme();
     
     // Setup Platform/Renderer backends
     ImGui_ImplGlfw_InitForOpenGL(window, true);
