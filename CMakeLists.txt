@@ -94,6 +94,7 @@ set(APP_SOURCES
     main.cpp
     SignalGui.cpp
     UsrpController.cpp
+	STFTSpectrogram.cpp
     ${HAL_SOURCES}
 )
 

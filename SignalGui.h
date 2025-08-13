@@ -1,16 +1,18 @@
 #pragma once
 
-#include "imgui.h"
-#include "implot.h"
-#include "CircularBuffer.h"
-#include "SDRDevice.h"
-#include "FFTProcessor.h"
-#include "Spectro3D.h"
 #include <memory>
 #include <atomic>
 #include <string>
 #include <vector>
 #include <chrono>
+
+#include "imgui.h"
+#include "implot.h"
+#include "CircularBuffer.h"
+#include "SDRDevice.h"
+#include "FFTProcessor.h"
+#include "STFTSpectrogram.h"
+#include "Spectro3D.h"
 
 class SignalGui {
 private:
@@ -75,6 +77,22 @@ private:
 	int custom_spectrum_colormap_ = -1;
 	void spectrumColormap();
 
+	std::unique_ptr<STFTSpectrogram> stft_processor_;
+	CircularBuffer<std::complex<float>> stft_sample_buffer_;
+    std::vector<float> stft_spectrogram_data_;
+    std::vector<float> stft_freq_axis_;
+    std::vector<float> stft_time_axis_;
+    int stft_freq_bins_ = 0;
+    int stft_time_frames_ = 0;
+    std::atomic<bool> stft_data_ready_{false};
+    std::atomic<bool> stft_display_ready_{false};
+    std::chrono::steady_clock::time_point last_stft_update_time_;
+    static constexpr int STFT_UPDATE_INTERVAL_MS = 500;
+    static constexpr int STFT_FFT_SIZE = 1024;
+    static constexpr int STFT_FFT_STRIDE = 512;
+    static constexpr int MAX_STFT_TIME_FRAMES = 120;
+	static constexpr size_t STFT_BUFFER_SIZE = 65536;
+
 public:
     SignalGui();
     ~SignalGui();
@@ -110,12 +128,17 @@ private:
     void UpdateWaterfall();
 	void updateRelTimeArray();
 	void updateTimeDataOffsets();
+	void UpdateSTFTSpectrogram();
     
     // Rendering functions
     void RenderTimeDomainPlot();
     void RenderFrequencyPlot();
     void RenderSpectrogramPlot();
+    void RenderSTFTSpectrogram();
     void RenderPowerSpectralDensity();
     void Render3DSpectrogramView();
     void RenderStatusBar();
+	void RenderRFMLTab();
+
+	void initializeSTFTProcessor();
 };

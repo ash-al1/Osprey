@@ -11,11 +11,12 @@
 SignalGui::SignalGui()
     : time_buffer_(N_SAMPLES)
     , signal_buffer_(N_SAMPLES)
-	, fft_size_(1024)
+	, fft_size_(8192)
 	, num_freq_bins_(fft_size_ / 2 + 1)
     , freq_buffer_(num_freq_bins_)
     , magnitude_buffer_(num_freq_bins_)
     , psd_buffer_(num_freq_bins_)
+    , stft_sample_buffer_(STFT_BUFFER_SIZE)
     , current_time_(0.0f)
     , sample_rate_(1000.0f)
 	, last_sample_rate_(-1.0)
@@ -44,6 +45,7 @@ SignalGui::SignalGui()
 	auto now = std::chrono::steady_clock::now();
 	last_freq_update_time_ = now;
 	last_waterfall_update_time_ = now;
+	last_stft_update_time_ = now;
 }
 
 SignalGui::~SignalGui() {
@@ -67,6 +69,9 @@ bool SignalGui::Initialize(const SDRConfig& config) {
     sample_rate_ = static_cast<float>(sdr_device_->getSampleRate());
     
     spectrogram_analyzer_ = std::make_unique<SpectrogramAnalyzer>(fft_size_, sample_rate_);
+
+	// Initialize STFT
+	initializeSTFTProcessor();
 
 	// Custom colormap for 2D spectrogram
 	spectrumColormap();
@@ -118,17 +123,98 @@ void SignalGui::ProcessSamples(const std::complex<float>* samples, size_t count)
 	new_time_data_available_.store(true);
 	current_time_ += count / sample_rate_;
     
+	if (stft_processor_) {
+        stft_sample_buffer_.PushBulk(samples, count);
+        size_t min_samples_needed = STFT_FFT_SIZE + (MAX_STFT_TIME_FRAMES - 1) * STFT_FFT_STRIDE;
+        if (stft_sample_buffer_.Size() >= min_samples_needed) {
+            stft_data_ready_.store(true);
+        }
+    }
+    
     if (spectrogram_analyzer_) {
         spectrogram_analyzer_->processSamples(samples, count);
     }
     
     samples_received_.fetch_add(count);
-    
+
     if (sdr_device_) {
         size_t device_overflows = sdr_device_->getOverflowCount();
         if (device_overflows > overflow_count_.load()) {
             overflow_count_.store(device_overflows);
         }
+    }
+}
+
+void SignalGui::RenderRFMLTab() {
+    if (stft_display_ready_.load() && stft_freq_bins_ > 0 && stft_time_frames_ > 0) {
+
+        // Black background (like torchsig)
+        ImPlot::PushStyleColor(ImPlotCol_PlotBg, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
+        ImPlot::PushStyleColor(ImPlotCol_FrameBg, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
+
+        if (ImPlot::BeginPlot("##STFTSpectrogram", ImVec2(-1, -1),
+                             ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText)) {
+
+            float freq_min = stft_freq_axis_[0];
+            float freq_max = stft_freq_axis_[stft_freq_bins_ - 1];
+            float time_min = stft_time_axis_[0];
+            float time_max = stft_time_axis_[stft_time_frames_ - 1];
+
+            ImPlot::SetupAxes("Frequency [Hz]", "Time [s]");
+            ImPlot::SetupAxesLimits(freq_min, freq_max, time_min, time_max, ImGuiCond_Always);
+
+            // Use grayscale: -80dB (noise) = black, 0dB (signal) = white
+            ImPlot::PushColormap(ImPlotColormap_Greys);
+
+            ImPlot::PlotHeatmap("##STFTHeatmap",
+                               stft_spectrogram_data_.data(),
+                               stft_freq_bins_, stft_time_frames_,
+                               0.0f, -80.0f,  // -80dB=black, 0dB=white
+                               nullptr,
+                               ImPlotPoint(freq_min, time_min),
+                               ImPlotPoint(freq_max, time_max));
+
+            ImPlot::PopColormap();
+            ImPlot::EndPlot();
+        }
+
+        ImPlot::PopStyleColor(2);
+    }
+}
+
+void SignalGui::UpdateSTFTSpectrogram() {
+    if (!stft_processor_ || !stft_data_ready_.load()) {
+        return;
+    }
+    
+    // Calculate how many samples we need
+    size_t min_samples_needed = STFT_FFT_SIZE + (MAX_STFT_TIME_FRAMES - 1) * STFT_FFT_STRIDE;
+    
+    if (stft_sample_buffer_.Size() < min_samples_needed) {
+        return; // Not enough samples yet
+    }
+    
+    // Copy samples from circular buffer to temporary vector
+    std::vector<std::complex<float>> temp_samples(min_samples_needed);
+    stft_sample_buffer_.CopyLatest(temp_samples.data(), min_samples_needed);
+    
+    // Compute STFT spectrogram
+    float* output_ptr = stft_spectrogram_data_.data();
+    bool success = stft_processor_->computeSpectrogram(
+        temp_samples.data(),
+        temp_samples.size(),
+        &output_ptr,
+        &stft_freq_bins_,
+        &stft_time_frames_
+    );
+    
+    if (success) {
+        double center_freq = sdr_device_ ? sdr_device_->getFrequency() : 0.0;
+        stft_processor_->generateFrequencyArray(stft_freq_axis_.data(), center_freq);
+        stft_processor_->generateTimeArray(stft_time_axis_.data(), stft_time_frames_);
+        
+        stft_data_ready_.store(false);
+        stft_display_ready_.store(true);
     }
 }
 
@@ -168,6 +254,15 @@ void SignalGui::Update() {
 		new_freq_data_available_.store(false);
 	}
 
+	// Update STFT spectrogram
+	auto stft_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        current_time - last_stft_update_time_).count();
+
+    if (stft_elapsed >= STFT_UPDATE_INTERVAL_MS) {
+        UpdateSTFTSpectrogram();
+        last_stft_update_time_ = current_time;
+    }
+
     // Set window position and size
     ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(WINDOW_WIDTH, WINDOW_HEIGHT), ImGuiCond_Always);
@@ -191,11 +286,15 @@ void SignalGui::Update() {
 			RenderPowerSpectralDensity();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("2D Spectrogram")) {
+        if (ImGui::BeginTabItem("Waterfall")) {
 			RenderSpectrogramPlot();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("3D Spectrogram")) {
+		if (ImGui::BeginTabItem("RFML")) {
+            RenderRFMLTab();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("3D")) {
             Render3DSpectrogramView();
             ImGui::EndTabItem();
         }
@@ -324,6 +423,7 @@ void SignalGui::RenderStatusBar() {
         ImGui::Text("No device");
     }
 }
+
 
 void SignalGui::updateRelTimeArray() {
 	for (int i = 0; i < N_SAMPLES; ++i) {
@@ -635,6 +735,33 @@ void SignalGui::spectrumColormap() {
 
     custom_spectrum_colormap_ = ImPlot::AddColormap("SpectrumAnalyzer",
 			spectrum_colors, sizeof(spectrum_colors) / sizeof(ImVec4));
+}
+
+void SignalGui::initializeSTFTProcessor() {
+    try {
+        stft_processor_ = std::make_unique<STFTSpectrogram>(
+            STFT_FFT_SIZE,
+            STFT_FFT_STRIDE,
+            sample_rate_
+        );
+
+        while (!stft_sample_buffer_.IsEmpty()) {
+            std::complex<float> dummy;
+            stft_sample_buffer_.Pop(dummy);
+        }
+
+        // Pre-allocate output buffers
+        stft_spectrogram_data_.resize(STFT_FFT_SIZE * MAX_STFT_TIME_FRAMES);
+        stft_freq_axis_.resize(STFT_FFT_SIZE);
+        stft_time_axis_.resize(MAX_STFT_TIME_FRAMES);
+
+        std::cout << "STFT processor initialized for RFML tab (buffer capacity: "
+                  << stft_sample_buffer_.Capacity() << ")" << std::endl;
+
+    } catch (const std::exception& e) {
+        std::cerr << "Failed to initialize STFT processor: " << e.what() << std::endl;
+        stft_processor_.reset();
+    }
 }
 
 // Info methods
