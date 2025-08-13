@@ -16,6 +16,22 @@ pkg_check_modules(UHD REQUIRED uhd)
 pkg_check_modules(RTLSDR rtl-sdr)
 pkg_check_modules(HACKRF hackrf)
 
+# Try to find LibTorch in common locations
+set(CMAKE_PREFIX_PATH 
+    "/opt/libtorch"
+    "$ENV{HOME}/libtorch" 
+    "${CMAKE_CURRENT_SOURCE_DIR}/libtorch"
+    "${CMAKE_PREFIX_PATH}")
+find_package(Torch QUIET)
+if(Torch_FOUND)
+    message(STATUS "LibTorch found at: ${TORCH_INSTALL_PREFIX}")
+    set(LIBTORCH_FOUND TRUE)
+else()
+    message(STATUS "LibTorch not found - YOLO inference will be disabled")
+    message(STATUS "  Searched in: /opt/libtorch, ~/libtorch, ./libtorch")
+    set(LIBTORCH_FOUND FALSE)
+endif()
+
 # Try to find PFFFT using pkg-config first, then fallback to manual linking
 pkg_check_modules(PFFFT pffft)
 if(NOT PFFFT_FOUND)
@@ -54,6 +70,14 @@ if(HACKRF_FOUND)
     add_definitions(-DHAS_HACKRF)
 endif()
 
+# Add LibTorch definitions
+if(LIBTORCH_FOUND)
+    add_definitions(-DHAS_LIBTORCH)
+    message(STATUS "YOLO inference will be enabled")
+else()
+    message(STATUS "YOLO inference will be disabled")
+endif()
+
 # ImGui source files
 set(IMGUI_SOURCES
     imgui/imgui.cpp
@@ -77,6 +101,7 @@ set(CORE_HAL_SOURCES
     SimulationDevice.cpp
     USRPDevice.cpp
     FFTProcessor.cpp
+    STFTSpectrogram.cpp
 )
 
 # Optional device sources
@@ -89,13 +114,19 @@ if(HACKRF_FOUND)
     list(APPEND HAL_SOURCES HackRFDevice.cpp)
 endif()
 
+# YOLO inference sources (only if LibTorch is found)
+set(YOLO_SOURCES)
+if(LIBTORCH_FOUND)
+    list(APPEND YOLO_SOURCES YoloInference.cpp)
+endif()
+
 # Application source files
 set(APP_SOURCES
     main.cpp
     SignalGui.cpp
     UsrpController.cpp
-	STFTSpectrogram.cpp
     ${HAL_SOURCES}
+    ${YOLO_SOURCES}
 )
 
 # OPENGL
@@ -132,6 +163,15 @@ if(PFFFT_FOUND)
     list(APPEND LINK_LIBRARIES ${PFFFT_LIBRARIES})
 endif()
 
+# Add LibTorch libraries if found
+if(LIBTORCH_FOUND)
+    list(APPEND LINK_LIBRARIES ${TORCH_LIBRARIES})
+    # Set the rpath for LibTorch (dynamic based on where it was found)
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        INSTALL_RPATH "${TORCH_INSTALL_PREFIX}/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE)
+endif()
+
 # Add optional SDR libraries
 if(RTLSDR_FOUND)
     list(APPEND LINK_LIBRARIES ${RTLSDR_LIBRARIES})
@@ -142,6 +182,14 @@ if(HACKRF_FOUND)
 endif()
 
 target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARIES} glm::glm)
+
+# Set C++17 and LibTorch compiler flags
+if(LIBTORCH_FOUND)
+    set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 17)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE HAS_LIBTORCH)
+    # LibTorch requires these flags
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
+endif()
 
 # Test programs
 add_executable(test_circular_buffer TestCircularBuffer.cpp)
@@ -179,8 +227,13 @@ message(STATUS "  UHD (USRP):    Found")
 message(STATUS "  RTL-SDR:       ${RTLSDR_FOUND}")
 message(STATUS "  HackRF:        ${HACKRF_FOUND}")
 message(STATUS "  PFFFT:         ${PFFFT_FOUND}")
+message(STATUS "  LibTorch:      ${LIBTORCH_FOUND}")
 if(PFFFT_FOUND)
     message(STATUS "  PFFFT Include: ${PFFFT_INCLUDE_DIRS}")
     message(STATUS "  PFFFT Libs:    ${PFFFT_LIBRARIES}")
+endif()
+if(LIBTORCH_FOUND)
+    message(STATUS "  LibTorch Path: ${TORCH_INSTALL_PREFIX}")
+    message(STATUS "  LibTorch Libs: ${TORCH_LIBRARIES}")
 endif()
 message(STATUS "")
