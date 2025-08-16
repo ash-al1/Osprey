@@ -16,22 +16,6 @@ pkg_check_modules(UHD REQUIRED uhd)
 pkg_check_modules(RTLSDR rtl-sdr)
 pkg_check_modules(HACKRF hackrf)
 
-# Try to find LibTorch in common locations
-set(CMAKE_PREFIX_PATH 
-    "/opt/libtorch"
-    "$ENV{HOME}/libtorch" 
-    "${CMAKE_CURRENT_SOURCE_DIR}/libtorch"
-    "${CMAKE_PREFIX_PATH}")
-find_package(Torch QUIET)
-if(Torch_FOUND)
-    message(STATUS "LibTorch found at: ${TORCH_INSTALL_PREFIX}")
-    set(LIBTORCH_FOUND TRUE)
-else()
-    message(STATUS "LibTorch not found - YOLO inference will be disabled")
-    message(STATUS "  Searched in: /opt/libtorch, ~/libtorch, ./libtorch")
-    set(LIBTORCH_FOUND FALSE)
-endif()
-
 # Try to find PFFFT using pkg-config first, then fallback to manual linking
 pkg_check_modules(PFFFT pffft)
 if(NOT PFFFT_FOUND)
@@ -70,14 +54,6 @@ if(HACKRF_FOUND)
     add_definitions(-DHAS_HACKRF)
 endif()
 
-# Add LibTorch definitions
-if(LIBTORCH_FOUND)
-    add_definitions(-DHAS_LIBTORCH)
-    message(STATUS "YOLO inference will be enabled")
-else()
-    message(STATUS "YOLO inference will be disabled")
-endif()
-
 # ImGui source files
 set(IMGUI_SOURCES
     imgui/imgui.cpp
@@ -114,19 +90,12 @@ if(HACKRF_FOUND)
     list(APPEND HAL_SOURCES HackRFDevice.cpp)
 endif()
 
-# YOLO inference sources (only if LibTorch is found)
-set(YOLO_SOURCES)
-if(LIBTORCH_FOUND)
-    list(APPEND YOLO_SOURCES YoloInference.cpp)
-endif()
-
 # Application source files
 set(APP_SOURCES
     main.cpp
     SignalGui.cpp
     UsrpController.cpp
     ${HAL_SOURCES}
-    ${YOLO_SOURCES}
 )
 
 # OPENGL
