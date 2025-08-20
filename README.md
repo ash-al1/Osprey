@@ -3,6 +3,13 @@
 Terribly cute implementation of a real-time software defined radio signal
 processing and visualization (2D & 3D spectrogram) application.
 
+<table>
+<tr>
+<td><img src="screenshot/2d.png" alt="2D View" width="400"/></td>
+<td><img src="screenshot/3d.png" alt="3D View" width="400"/></td>
+</tr>
+</table>
+
 ---
 
 ## Storyline
