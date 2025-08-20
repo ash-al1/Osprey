@@ -4,7 +4,6 @@ Terribly cute implementation of a real-time software defined radio signal
 processing and visualization (2D & 3D spectrogram) application.
 
 ![2D View](screenshot/2d.png)
-![3D View](screenshot/3d.png)
 
 ---
 
